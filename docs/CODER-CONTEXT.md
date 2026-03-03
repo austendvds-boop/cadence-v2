@@ -135,3 +135,27 @@ Implement onboarding + Stripe checkout + async provisioning pipeline + frontend 
 - Commit: `<pending>`
 - Push: `<pending>`
 
+## 2026-03-03 (Onboarding CORS origin fix)
+
+### Task
+Fix live onboarding POST `/api/onboarding/start` CORS failure (status 0) by allowing both autom8 root + www and supporting strict Vercel production alias origin when configured.
+
+### Changes made
+- Updated `src/onboarding.ts` CORS origin allowlist logic:
+  - Added explicit allowlist entries:
+    - `https://autom8everything.com`
+    - `https://www.autom8everything.com`
+  - Added strict origin extraction from `ONBOARDING_SUCCESS_URL` and `ONBOARDING_CANCEL_URL` (HTTPS origin only), so a configured Vercel production alias origin is allowed without using any wildcard.
+  - Preserved existing OPTIONS preflight handling (`204` + early return) and existing endpoint behavior.
+
+### Files touched
+- `src/onboarding.ts`
+- `docs/CODER-CONTEXT.md`
+
+### Verification
+- `npm run build` ✅
+
+### Git
+- Commit: `<pending>`
+- Push: `<pending>`
+

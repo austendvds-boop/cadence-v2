@@ -18,9 +18,35 @@ function isE164(value: string): boolean {
   return /^\+[1-9]\d{7,14}$/.test(value);
 }
 
+function getAllowedOnboardingOrigins(): Set<string> {
+  const allowed = new Set<string>([
+    "https://autom8everything.com",
+    "https://www.autom8everything.com"
+  ]);
+
+  const maybeAddOriginFromUrl = (value?: string) => {
+    if (!value) return;
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol === "https:") {
+        allowed.add(parsed.origin);
+      }
+    } catch {
+      // ignore invalid URL envs
+    }
+  };
+
+  maybeAddOriginFromUrl(process.env.ONBOARDING_SUCCESS_URL);
+  maybeAddOriginFromUrl(process.env.ONBOARDING_CANCEL_URL);
+
+  return allowed;
+}
+
 function applyOnboardingCors(req: express.Request, res: express.Response): boolean {
   const origin = req.headers.origin;
-  if (origin === "https://autom8everything.com") {
+  const allowedOrigins = getAllowedOnboardingOrigins();
+
+  if (origin && allowedOrigins.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
