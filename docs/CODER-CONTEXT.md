@@ -16,5 +16,5 @@ Fix Deepgram live STT config so `UtteranceEnd` events fire reliably when using `
 - `npm run build` ✅ (TypeScript compile passed clean)
 
 ### Git
-- Commit: _pending in this run_
-- Push: _pending in this run_
+- Commit: `cd3085d` — `fix: add interim_results for UtteranceEnd to work`
+- Push: `main` pushed to `origin`/GitHub (`austendvds-boop/cadence-v2`)
