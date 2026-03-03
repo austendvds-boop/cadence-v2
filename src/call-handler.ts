@@ -20,6 +20,18 @@ type TwilioMessage = {
 
 const BOOKING_LINK_REGEX = /(text|send).*(link)|(link).*(text|send)/i;
 
+export interface ClientConfig {
+  clientId: string;
+  businessName: string;
+  systemPrompt: string;
+  transferNumber: string | null;
+  greeting: string;
+  smsEnabled: boolean;
+  bookingUrl: string | null;
+  ownerPhone: string | null;
+  twilioNumber: string;
+}
+
 export class CallHandler {
   private streamSid = "";
   private dgConnection: ListenLiveClient | null = null;
@@ -29,7 +41,10 @@ export class CallHandler {
   private callerPhone = "unknown";
   private bookingLinkSent = false;
 
-  constructor(private readonly ws: WebSocket) {}
+  constructor(
+    private readonly ws: WebSocket,
+    private readonly client: ClientConfig
+  ) {}
 
   async handleMessage(raw: string): Promise<void> {
     const msg = JSON.parse(raw) as TwilioMessage;
@@ -59,7 +74,7 @@ export class CallHandler {
 
     this.isSpeaking = true;
     try {
-      await speak("Thanks for calling Deer Valley Driving School. How can I help you today?", (audio) => {
+      await speak(this.client.greeting, (audio) => {
         this.sendAudio(audio);
       });
     } catch (err) {
@@ -85,14 +100,20 @@ export class CallHandler {
     this.callSummary.push(`Caller: ${transcript}`);
     this.conversationHistory.push({ role: "user", content: transcript });
 
-    const response = await chat(this.conversationHistory);
+    const response = await chat(this.client.systemPrompt, this.conversationHistory);
     this.conversationHistory.push({ role: "assistant", content: response });
     this.callSummary.push(`Cadence: ${response}`);
 
-    if (!this.bookingLinkSent && this.callerPhone !== "unknown" && BOOKING_LINK_REGEX.test(response)) {
+    if (
+      !this.bookingLinkSent &&
+      this.client.smsEnabled &&
+      !!this.client.bookingUrl &&
+      this.callerPhone !== "unknown" &&
+      BOOKING_LINK_REGEX.test(response)
+    ) {
       this.bookingLinkSent = true;
       try {
-        await sendBookingLink(this.callerPhone);
+        await sendBookingLink(this.callerPhone, this.client.twilioNumber, this.client.bookingUrl);
       } catch (err) {
         console.error(`[CALL:${this.streamSid}] booking link sms failed`, err);
       }
@@ -116,8 +137,16 @@ export class CallHandler {
       console.error(`[CALL:${this.streamSid}] stt close failed`, err);
     }
 
+    if (!this.client.ownerPhone) return;
+
     try {
-      await sendCallSummary(this.callerPhone, this.callSummary.slice(-10));
+      await sendCallSummary(
+        this.callerPhone,
+        this.callSummary.slice(-10),
+        this.client.ownerPhone,
+        this.client.twilioNumber,
+        this.client.businessName
+      );
     } catch (err) {
       console.error(`[CALL:${this.streamSid}] summary sms failed`, err);
     }

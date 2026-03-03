@@ -1,5 +1,3 @@
-import { SYSTEM_PROMPT } from "./system-prompt";
-
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
@@ -33,8 +31,11 @@ async function callChatApi(endpoint: string, apiKey: string, model: string, mess
   }
 }
 
-export async function chat(history: Array<{ role: "user" | "assistant"; content: string }>): Promise<string> {
-  const messages: ChatMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...history];
+export async function chat(
+  systemPrompt: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>
+): Promise<string> {
+  const messages: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...history];
 
   try {
     return await callChatApi(

@@ -2,8 +2,12 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import { CallHandler } from "./call-handler";
+import { getClientById, getClientByPhone, isTrialExpired } from "./db";
+import { handleStripeWebhook } from "./stripe";
 
 const app = express();
+
+app.post("/webhook/stripe", express.raw({ type: "application/json" }), handleStripeWebhook);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
@@ -11,13 +15,39 @@ app.get("/", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-app.post("/incoming-call", (_req, res) => {
+app.post("/incoming-call", async (req, res) => {
+  const toNumber: string = req.body.To || req.body.Called || "";
+  const fromNumber: string = req.body.From || req.body.Caller || "";
+
+  const client = await getClientByPhone(toNumber);
+
+  if (!client) {
+    return res
+      .type("text/xml")
+      .send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>This number is not currently active. Goodbye.</Say><Hangup/></Response>');
+  }
+
+  if (!client.active || isTrialExpired(client)) {
+    return res
+      .type("text/xml")
+      .send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>This service is currently unavailable.</Say><Hangup/></Response>');
+  }
+
   const streamUrl = process.env.TWILIO_WEBSOCKET_URL;
   if (!streamUrl) {
     return res.status(500).type("text/plain").send("Missing TWILIO_WEBSOCKET_URL");
   }
 
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n  <Connect>\n    <Stream url="${streamUrl}" />\n  </Connect>\n</Response>`;
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="${streamUrl}">
+      <Parameter name="clientId" value="${client.id}" />
+      <Parameter name="from" value="${fromNumber}" />
+    </Stream>
+  </Connect>
+</Response>`;
+
   res.type("text/xml").send(twiml);
 });
 
@@ -25,11 +55,42 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/media-stream" });
 
 wss.on("connection", (ws) => {
-  const handler = new CallHandler(ws);
+  let handler: CallHandler | null = null;
 
   ws.on("message", async (message) => {
     try {
-      await handler.handleMessage(message.toString());
+      const raw = message.toString();
+      const parsed = JSON.parse(raw) as { event?: string; start?: { customParameters?: Record<string, string> } };
+
+      if (!handler && parsed.event === "start") {
+        const clientId = parsed.start?.customParameters?.clientId;
+        if (!clientId) {
+          ws.close();
+          return;
+        }
+
+        const client = await getClientById(clientId);
+        if (!client) {
+          ws.close();
+          return;
+        }
+
+        handler = new CallHandler(ws, {
+          clientId: client.id,
+          businessName: client.business_name,
+          systemPrompt: client.system_prompt,
+          transferNumber: client.transfer_number,
+          greeting: client.greeting,
+          smsEnabled: client.sms_enabled,
+          bookingUrl: client.booking_url,
+          ownerPhone: client.owner_phone,
+          twilioNumber: client.phone_number
+        });
+      }
+
+      if (handler) {
+        await handler.handleMessage(raw);
+      }
     } catch (err) {
       console.error("failed to handle ws message", err);
     }
@@ -45,7 +106,7 @@ server.listen(port, () => {
   console.log(`cadence-v2 listening on ${port}`);
 });
 
-for (const signal of ["SIGTERM", "SIGINT"]) {
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     wss.close();
     server.close(() => process.exit(0));

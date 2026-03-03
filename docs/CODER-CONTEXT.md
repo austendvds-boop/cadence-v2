@@ -45,3 +45,47 @@ Harden Deepgram STT callback handling so async errors in transcript processing c
 ### Git
 - Commit: `<pending>` — `fix: harden STT callback error handling`
 - Push: `<pending>`
+
+## 2026-03-03 (Multi-tenant platform + billing)
+
+### Task
+Implement Cadence v2 multi-tenant architecture per `docs/multi-tenant-blueprint.md`, migrate DVDS as client #1, add Stripe webhook billing enforcement, and prepare Railway env migration.
+
+### Changes made
+- Added Neon/Postgres data layer and hot-path client lookup:
+  - New `src/db.ts` with pooled DB connection, client lookup helpers, trial expiry check, and Stripe lookup helpers.
+- Added prompt template generator:
+  - New `src/prompt-template.ts` with `generateSystemPrompt()` and typed params.
+- Added Stripe webhook handling:
+  - New `src/stripe.ts` with verification and handlers for `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`.
+- Added provisioning CLI:
+  - New `scripts/add-client.ts` to collect business data, buy/configure Twilio number, generate prompt, and insert client row.
+- Added DB schema migration:
+  - New `sql/001-clients.sql` creating `clients` table + indexes.
+- Updated call routing:
+  - `src/index.ts` now routes incoming calls by Twilio `To` number, checks `active` + trial status, passes `clientId`/`from` via Twilio stream parameters, and exposes `/webhook/stripe` raw-body endpoint.
+- Updated runtime call pipeline:
+  - `src/call-handler.ts` now accepts per-client config (`systemPrompt`, `transferNumber`, `greeting`, `ownerPhone`, `twilioNumber`, etc.).
+  - `src/llm.ts` now takes `systemPrompt` argument instead of hardcoded prompt import.
+  - `src/sms.ts` now sends from client Twilio number and sends summaries to client owner phone.
+- Installed dependencies:
+  - `pg`, `@types/pg`, `stripe`, `tsx`.
+
+### Data migration
+- Executed `sql/001-clients.sql` against Neon database from `credentials/neon-cadence-db.txt`.
+- Upserted DVDS client row:
+  - `phone_number`: `+19284477047`
+  - `business_name`: `Deer Valley Driving School`
+  - `transfer_number`: `+16026633502`
+  - `system_prompt`: full text pulled from `src/system-prompt.ts`
+  - `sms_enabled`: `true`
+  - `plan`: `starter`
+  - `active`: `true`
+  - `trial_ends_at`: `NULL`
+
+### Verification
+- `npm run build` ✅ (clean TypeScript compile)
+
+### Deployment notes
+- Railway GraphQL update attempted with token at `credentials/railway-token.txt`, but API returned `Not Authorized` for both `me` query and variable upsert mutation. Env var update is blocked until valid Railway API auth token/permissions are provided.
+

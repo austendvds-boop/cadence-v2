@@ -4,10 +4,9 @@ function requireEnv(key: string): string {
   return value;
 }
 
-async function sendSms(to: string, body: string): Promise<void> {
+async function sendSms(to: string, from: string, body: string): Promise<void> {
   const sid = requireEnv("TWILIO_ACCOUNT_SID");
   const token = requireEnv("TWILIO_AUTH_TOKEN");
-  const from = requireEnv("TWILIO_SMS_NUMBER");
 
   const auth = Buffer.from(`${sid}:${token}`).toString("base64");
   const form = new URLSearchParams({ To: to, From: from, Body: body });
@@ -27,12 +26,17 @@ async function sendSms(to: string, body: string): Promise<void> {
   }
 }
 
-export async function sendBookingLink(to: string): Promise<void> {
-  await sendSms(to, "Here is the DVDS booking link: https://www.deervalleydrivingschool.com");
+export async function sendBookingLink(to: string, from: string, bookingUrl: string): Promise<void> {
+  await sendSms(to, from, `Here's the link to book: ${bookingUrl}`);
 }
 
-export async function sendCallSummary(callerPhone: string, summary: string[]): Promise<void> {
-  const austen = requireEnv("AUSTEN_CELL_NUMBER");
+export async function sendCallSummary(
+  callerPhone: string,
+  summary: string[],
+  ownerPhone: string,
+  from: string,
+  businessName: string
+): Promise<void> {
   const bullets = summary.length > 0 ? summary.map((s) => `• ${s}`).join("\n") : "• No key points captured";
-  await sendSms(austen, `Cadence call summary\nCaller: ${callerPhone}\n${bullets}`);
+  await sendSms(ownerPhone, from, `${businessName} — call summary\nCaller: ${callerPhone}\n${bullets}`);
 }
