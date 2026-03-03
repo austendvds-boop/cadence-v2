@@ -22,10 +22,14 @@ export function createLiveSTT(onTranscript: (text: string) => Promise<void> | vo
   let finalBuffer = "";
 
   connection.on(LiveTranscriptionEvents.Transcript, async (event) => {
-    const text = event.channel.alternatives[0]?.transcript?.trim();
-    if (!text) return;
-    if (event.is_final) {
-      finalBuffer = finalBuffer ? `${finalBuffer} ${text}` : text;
+    try {
+      const text = event.channel.alternatives[0]?.transcript?.trim();
+      if (!text) return;
+      if (event.is_final) {
+        finalBuffer = finalBuffer ? `${finalBuffer} ${text}` : text;
+      }
+    } catch (err) {
+      console.error("[STT] transcript parse error", err);
     }
   });
 
@@ -33,7 +37,12 @@ export function createLiveSTT(onTranscript: (text: string) => Promise<void> | vo
     const utterance = finalBuffer.trim();
     finalBuffer = "";
     if (!utterance) return;
-    await onTranscript(utterance);
+
+    try {
+      await onTranscript(utterance);
+    } catch (err) {
+      console.error("[STT] onTranscript callback error", err);
+    }
   });
 
   connection.on(LiveTranscriptionEvents.Error, (err) => {
