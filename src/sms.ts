@@ -4,7 +4,7 @@ function requireEnv(key: string): string {
   return value;
 }
 
-async function sendSms(to: string, from: string, body: string): Promise<void> {
+export async function sendSms(to: string, from: string, body: string): Promise<void> {
   const sid = requireEnv("TWILIO_ACCOUNT_SID");
   const token = requireEnv("TWILIO_AUTH_TOKEN");
 

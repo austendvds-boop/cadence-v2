@@ -4,12 +4,14 @@ import { createServer } from "http";
 import { CallHandler } from "./call-handler";
 import { getClientById, getClientByPhone, isTrialExpired } from "./db";
 import { handleStripeWebhook } from "./stripe";
+import onboardingRouter from "./onboarding";
 
 const app = express();
 
 app.post("/webhook/stripe", express.raw({ type: "application/json" }), handleStripeWebhook);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+app.use("/api/onboarding", onboardingRouter);
 
 app.get("/", (_req, res) => {
   res.json({ status: "ok" });

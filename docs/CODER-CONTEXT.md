@@ -89,3 +89,49 @@ Implement Cadence v2 multi-tenant architecture per `docs/multi-tenant-blueprint.
 ### Deployment notes
 - Railway GraphQL update attempted with token at `credentials/railway-token.txt`, but API returned `Not Authorized` for both `me` query and variable upsert mutation. Env var update is blocked until valid Railway API auth token/permissions are provided.
 
+## 2026-03-03 (SaaS onboarding MVP - Phase 1)
+
+### Task
+Implement onboarding + Stripe checkout + async provisioning pipeline + frontend integration for self-serve Cadence signup.
+
+### Backend changes (`cadence-v2`)
+- Added `sql/002-onboarding.sql`:
+  - `onboarding_sessions`
+  - `processed_stripe_events`
+  - `audit_log`
+  - `clients` column additions (`owner_name`, `owner_email`, `onboarding_session_id`, `twilio_number_sid`, `deactivated_at`, `number_release_after`)
+- Added onboarding API router (`src/onboarding.ts`):
+  - `POST /api/onboarding/start`
+  - `POST /api/onboarding/checkout`
+  - `GET /api/onboarding/status/:sessionId`
+  - scoped CORS for `https://autom8everything.com`
+- Added async provisioning pipeline (`src/provisioning.ts`):
+  - status claim (`checkout_complete` -> `provisioning`) for race safety
+  - Twilio number purchase + fallback area code search
+  - number webhook configuration
+  - prompt generation via `generateSystemPrompt`
+  - client insert + onboarding session linkage
+  - onboarding audit log insert
+  - owner welcome SMS
+- Added Twilio number helper (`src/twilio-numbers.ts`) with fallback map and provisioning utilities.
+- Added audit helper (`src/audit.ts`).
+- Extended Stripe webhook (`src/stripe.ts`):
+  - handles `checkout.session.completed`
+  - dedupes via `processed_stripe_events`
+  - triggers async provisioning pipeline and returns webhook 200 quickly
+  - writes billing/provisioning audit events
+- Updated `src/db.ts`:
+  - expanded `Client` shape to include onboarding/deactivation fields
+  - added `OnboardingSession` type and query helper
+  - deactivation enhancement in `setClientActive(false)` to set `deactivated_at` and `number_release_after = now() + 30 days`
+- Updated `src/index.ts` to mount onboarding routes.
+- Updated `src/sms.ts` to export `sendSms` helper.
+- Updated `.env.example` with onboarding/checkout/provisioning vars.
+
+### Verification
+- `npm run build` ✅
+
+### Git
+- Commit: `<pending>`
+- Push: `<pending>`
+
