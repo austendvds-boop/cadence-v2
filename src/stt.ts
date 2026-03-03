@@ -15,6 +15,7 @@ export function createLiveSTT(onTranscript: (text: string) => Promise<void> | vo
     channels: 1,
     punctuate: true,
     smart_format: true,
+    interim_results: true,
     utterance_end_ms: 1000
   });
 
