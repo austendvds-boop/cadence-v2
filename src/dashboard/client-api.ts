@@ -40,6 +40,7 @@ type UpdatedClientRow = {
   timezone: string | null;
   fallback_mode: string | null;
   intake_mode: string | null;
+  sms_number: string | null;
 };
 
 type RawBody = Record<string, unknown>;
@@ -91,6 +92,22 @@ function normalizeSummaryLines(value: unknown): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+function serializeClientSettings(row: UpdatedClientRow) {
+  return {
+    id: row.id,
+    businessName: row.business_name,
+    greeting: row.greeting,
+    transferNumber: row.transfer_number,
+    smsEnabled: row.sms_enabled,
+    bookingUrl: row.booking_url,
+    ownerPhone: row.owner_phone,
+    timezone: row.timezone,
+    fallbackMode: row.fallback_mode,
+    intakeMode: row.intake_mode,
+    smsNumber: row.sms_number
+  };
+}
+
 function resolveClientId(req: DashboardAuthedRequest): string | null {
   const user = req.dashboardUser;
   if (!user) return null;
@@ -115,6 +132,40 @@ async function ensureClientAccess(req: DashboardAuthedRequest, res: express.Resp
 }
 
 router.use(requireDashboardUser);
+
+router.get("/settings", async (req, res) => {
+  const clientId = await ensureClientAccess(req, res);
+  if (!clientId) return;
+
+  const result = await pool.query<UpdatedClientRow>(
+    `SELECT
+      id,
+      business_name,
+      greeting,
+      transfer_number,
+      sms_enabled,
+      booking_url,
+      owner_phone,
+      timezone,
+      fallback_mode,
+      intake_mode,
+      sms_number
+     FROM clients
+     WHERE id = $1
+     LIMIT 1`,
+    [clientId]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    res.status(404).json({ error: "Client not found" });
+    return;
+  }
+
+  res.status(200).json({
+    settings: serializeClientSettings(row)
+  });
+});
 
 router.get("/calls", async (req, res) => {
   const clientId = await ensureClientAccess(req, res);
@@ -394,7 +445,8 @@ router.put("/settings", async (req, res) => {
         owner_phone,
         timezone,
         fallback_mode,
-        intake_mode
+        intake_mode,
+        sms_number
        FROM clients
        WHERE id = $1
        LIMIT 1`,
@@ -412,18 +464,7 @@ router.put("/settings", async (req, res) => {
 
     res.status(200).json({
       ok: true,
-      settings: {
-        id: row.id,
-        businessName: row.business_name,
-        greeting: row.greeting,
-        transferNumber: row.transfer_number,
-        smsEnabled: row.sms_enabled,
-        bookingUrl: row.booking_url,
-        ownerPhone: row.owner_phone,
-        timezone: row.timezone,
-        fallbackMode: row.fallback_mode,
-        intakeMode: row.intake_mode
-      }
+      settings: serializeClientSettings(row)
     });
   } catch (err) {
     await dbClient.query("ROLLBACK");

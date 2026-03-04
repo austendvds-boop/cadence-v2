@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cadence Admin Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="container">
+        <div class="topbar">
+          <div class="brand">cadence<span>.admin</span></div>
+          <div class="actions">
+            <button id="refresh-admin">Refresh</button>
+            <button id="logout-admin">Log out</button>
+          </div>
+        </div>
+
+        <section class="card">
+          <div class="inline" style="justify-content: space-between">
+            <div>
+              <h3>Client control plane</h3>
+              <p class="muted">Status, call volume, and account metadata.</p>
+            </div>
+            <div class="actions">
+              <label>
+                Status filter
+                <select id="status-filter">
+                  <option value="all">All</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </label>
+              <button id="export-csv" class="primary" type="button">Export CSV</button>
+            </div>
+          </div>
+
+          <p id="admin-notice" class="notice"></p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Business</th>
+                  <th>Status</th>
+                  <th>Plan</th>
+                  <th>Owner</th>
+                  <th>Total Calls</th>
+                  <th>Month Calls</th>
+                  <th>Month Mins</th>
+                  <th>Last Call</th>
+                </tr>
+              </thead>
+              <tbody id="clients-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script src="./admin.js"></script>
+  </body>
+</html>

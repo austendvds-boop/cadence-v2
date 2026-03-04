@@ -26,6 +26,7 @@ app.use("/api/onboarding", onboardingRouter);
 app.use("/dashboard/auth", dashboardAuthRouter);
 app.use("/dashboard/api/admin", dashboardAdminApiRouter);
 app.use("/dashboard/api", dashboardClientApiRouter);
+app.use("/dashboard", express.static("public/dashboard"));
 
 app.get("/", (_req, res) => {
   res.json({ status: "ok" });

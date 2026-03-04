@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cadence Client Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="container">
+        <div class="topbar">
+          <div class="brand">cadence<span>.client</span></div>
+          <div class="actions">
+            <button id="refresh-client">Refresh</button>
+            <button id="logout-client">Log out</button>
+          </div>
+        </div>
+
+        <p id="client-notice" class="notice"></p>
+
+        <div class="grid">
+          <section class="card">
+            <h3>Usage (last 6 months)</h3>
+            <p class="muted">Monthly call volume from <code>/dashboard/api/usage</code>.</p>
+            <div id="usage-chart" class="usage-chart"></div>
+            <div id="usage-labels" class="usage-labels"></div>
+          </section>
+
+          <section class="card">
+            <h3>Settings editor</h3>
+            <p class="muted">Update core tenant settings in one shot.</p>
+            <form id="settings-form">
+              <label>Business name <input id="businessName" name="businessName" type="text" /></label>
+              <label>Greeting <textarea id="greeting" name="greeting"></textarea></label>
+              <label>Transfer number <input id="transferNumber" name="transferNumber" type="text" /></label>
+              <label>SMS enabled <input id="smsEnabled" name="smsEnabled" type="checkbox" /></label>
+              <label>Booking URL <input id="bookingUrl" name="bookingUrl" type="url" /></label>
+              <label>Owner phone <input id="ownerPhone" name="ownerPhone" type="text" /></label>
+              <label>Timezone <input id="timezone" name="timezone" type="text" placeholder="America/Phoenix" /></label>
+              <label>Fallback mode <input id="fallbackMode" name="fallbackMode" type="text" /></label>
+              <label>Intake mode <input id="intakeMode" name="intakeMode" type="text" /></label>
+              <div class="actions">
+                <button id="save-settings" class="primary" type="submit">Save settings</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="card grid-full">
+            <div class="inline" style="justify-content: space-between">
+              <h3>Call log</h3>
+              <span class="muted">From <code>/dashboard/api/calls</code></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Started</th>
+                    <th>Caller</th>
+                    <th>Duration</th>
+                    <th>Turns</th>
+                    <th>Summary</th>
+                  </tr>
+                </thead>
+                <tbody id="calls-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <script src="./client.js"></script>
+  </body>
+</html>

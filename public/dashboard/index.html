@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cadence Dashboard Login</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <div class="container centered">
+        <div class="topbar">
+          <div class="brand">cadence<span>.dashboard</span></div>
+        </div>
+
+        <section class="card">
+          <h2>Sign in with magic link</h2>
+          <p class="muted">Enter the email tied to your Cadence account. We'll send a one-time link.</p>
+
+          <form id="login-form">
+            <label>
+              Email
+              <input id="email" name="email" type="email" autocomplete="email" placeholder="you@business.com" required />
+            </label>
+            <button id="submit-btn" class="primary" type="submit">Send magic link</button>
+          </form>
+
+          <p id="login-notice" class="notice"></p>
+        </section>
+      </div>
+    </div>
+
+    <script src="./login.js"></script>
+  </body>
+</html>

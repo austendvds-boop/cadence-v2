@@ -160,7 +160,8 @@ function getDashboardBaseUrl(req: express.Request): string {
 
 function buildMagicLink(req: express.Request, token: string): string {
   const baseUrl = getDashboardBaseUrl(req);
-  return `${baseUrl}/dashboard/auth/verify?token=${encodeURIComponent(token)}`;
+  const redirect = encodeURIComponent("/dashboard");
+  return `${baseUrl}/dashboard/auth/verify?token=${encodeURIComponent(token)}&redirect=${redirect}`;
 }
 
 function createSessionToken(user: DashboardSessionUser): string {
