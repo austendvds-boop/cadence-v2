@@ -2,6 +2,7 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import { CallHandler } from "./call-handler";
+import { OnboardingCallHandler } from "./onboarding-call-handler";
 import { getClientByPhone, isTrialExpired } from "./db";
 import { getTenantRuntimeConfig } from "./tenant-config";
 import { handleStripeWebhook } from "./stripe";
@@ -58,7 +59,7 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/media-stream" });
 
 wss.on("connection", (ws) => {
-  let handler: CallHandler | null = null;
+  let handler: { handleMessage: (raw: string) => Promise<void> } | null = null;
 
   ws.on("message", async (message) => {
     try {
@@ -78,7 +79,7 @@ wss.on("connection", (ws) => {
           return;
         }
 
-        handler = new CallHandler(ws, {
+        const handlerConfig = {
           clientId: tenantConfig.clientId,
           businessName: tenantConfig.businessName,
           systemPrompt: tenantConfig.systemPrompt,
@@ -88,7 +89,13 @@ wss.on("connection", (ws) => {
           bookingUrl: tenantConfig.bookingUrl,
           ownerPhone: tenantConfig.ownerPhone,
           twilioNumber: tenantConfig.twilioNumber
-        });
+        };
+
+        if (tenantConfig.intakeMode === "onboarding") {
+          handler = new OnboardingCallHandler(ws, handlerConfig);
+        } else {
+          handler = new CallHandler(ws, handlerConfig);
+        }
       }
 
       if (handler) {
