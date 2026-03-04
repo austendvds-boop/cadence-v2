@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "smoke:onboarding-e2e": "tsx scripts/smoke-onboarding-e2e.ts"
   },
   "dependencies": {
     "@deepgram/sdk": "^3.12.0",

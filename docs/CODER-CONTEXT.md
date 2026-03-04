@@ -159,3 +159,51 @@ Fix live onboarding POST `/api/onboarding/start` CORS failure (status 0) by allo
 - Commit: `<pending>`
 - Push: `<pending>`
 
+## 2026-03-04 (Phase 2c onboarding e2e smoke + prompt polish)
+
+### Task
+Add an end-to-end onboarding smoke test, add shared provisioning entrypoint (`provision-client.ts`) for safe mock invocation, polish onboarding prompt copy, and verify DVDS inbound call path is unaffected.
+
+### Changes made
+- Added new onboarding prompt constants in `src/onboarding-prompt.ts`:
+  - Exact required greeting string.
+  - Exact confirmation phrase (`"Let me make sure I got everything right..."`).
+  - Exact sign-off phrase (`"You're all set! Someone from our team will reach out within 24 hours. Thanks for choosing Autom8!"`).
+  - Full onboarding system prompt constrained to casual/friendly 2–3 sentence turns.
+- Added `src/provision-client.ts` shared provisioning orchestrator:
+  - Exports typed `provisionClient(...)` function.
+  - Supports `dryRun` mode for safe mock invocation (no Twilio purchase / no DB insert).
+  - In non-dry mode handles Twilio number purchase/config, client insert, audit log write, optional welcome SMS.
+- Added `scripts/smoke-onboarding-e2e.ts`:
+  - Verifies onboarding tenant exists for `+14806313993`.
+  - Applies/persists polished onboarding greeting + system prompt to that tenant row.
+  - Verifies `POST /incoming-call` TwiML shape for onboarding line.
+  - Verifies `POST /incoming-call` TwiML shape for DVDS production line `+19284477047`.
+  - Verifies `provision-client.ts` mock dry-run invocation does not crash.
+  - Verifies Twilio API auth/access by listing available numbers.
+  - Emits machine-readable `SMOKE_RESULT_JSON=...` summary.
+- Updated `package.json` scripts:
+  - Added `smoke:onboarding-e2e` -> `tsx scripts/smoke-onboarding-e2e.ts`.
+
+### Files touched
+- `src/onboarding-prompt.ts`
+- `src/provision-client.ts`
+- `scripts/smoke-onboarding-e2e.ts`
+- `package.json`
+- `docs/CODER-CONTEXT.md`
+
+### Verification
+- `npm run build` ✅
+- `npx tsx scripts/smoke-onboarding-e2e.ts` ✅
+  - onboarding tenant lookup ✅
+  - onboarding prompt polish/update ✅
+  - onboarding `/incoming-call` TwiML ✅
+  - DVDS `/incoming-call` TwiML ✅
+  - `provision-client.ts` dry-run call ✅
+  - Twilio available-number API call ✅
+- Frozen voice files unchanged (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
+
+### Git
+- Commit: `<pending>`
+- Push: `<pending>`
+
