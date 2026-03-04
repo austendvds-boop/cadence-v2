@@ -6,6 +6,7 @@ export const ONBOARDING_FIELD_NAMES = [
   "hours",
   "services",
   "faqs",
+  "call_handling",
   "transfer_number",
   "email"
 ] as const;
@@ -18,6 +19,7 @@ export const REQUIRED_ONBOARDING_FIELDS: OnboardingFieldName[] = [
   "hours",
   "services",
   "faqs",
+  "call_handling",
   "email"
 ];
 

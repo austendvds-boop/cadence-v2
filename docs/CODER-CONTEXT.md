@@ -1,5 +1,61 @@
 # Coder Context
 
+## 2026-03-04 (Phase 3a Stripe billing integration)
+
+### Task
+Implement Phase 3a billing components: Stripe checkout session generation for post-onboarding, billing webhook mapping into dedicated billing tables, deactivation TwiML policy, and Stripe webhook route wiring.
+
+### Changes made
+- Added new billing migration:
+  - `sql/005-billing.sql`
+    - `billing_subscriptions` table
+    - `billing_events` table
+    - indexes for client/customer/subscription/event lookup
+- Added `src/billing-service.ts`:
+  - `createCheckoutSession(clientId, email)`
+  - `handleWebhookEvent(event)`
+  - Stripe event mapping for:
+    - `checkout.session.completed`
+    - `customer.subscription.created`
+    - `customer.subscription.updated`
+    - `customer.subscription.deleted`
+    - `invoice.paid`
+    - `invoice.payment_failed`
+  - Updates both `billing_subscriptions` + `clients.active` lifecycle
+  - Persists webhook payload/idempotency records in `billing_events`
+- Added `src/billing-checkout.ts`:
+  - Generates post-onboarding checkout link + SMS/email copy from Stripe checkout session.
+- Added `src/deactivation-policy.ts`:
+  - Deactivation reason helper + polite "temporarily unavailable" TwiML renderer for inactive/trial-expired clients.
+- Updated `src/stripe.ts`:
+  - Delegates Stripe lifecycle mapping to `billing-service.ts`
+  - Preserves onboarding provisioning trigger for `checkout.session.completed` with `onboarding_session_id`
+- Updated `src/index.ts`:
+  - Wired `POST /stripe-webhook` (and kept `/webhook/stripe` compatibility path)
+  - Wired deactivation policy check into `POST /incoming-call` before Twilio stream connect.
+- Updated `src/provision-client.ts`:
+  - Creates Stripe checkout link post-provisioning via `generatePostOnboardingCheckoutLink(...)`
+  - Sends billing checkout link in owner welcome SMS when owner email exists
+  - Adds billing checkout metadata to returned result + audit log entries.
+
+### Files touched (Phase 3a)
+- `sql/005-billing.sql` (new)
+- `src/billing-service.ts` (new)
+- `src/billing-checkout.ts` (new)
+- `src/deactivation-policy.ts` (new)
+- `src/stripe.ts`
+- `src/index.ts`
+- `src/provision-client.ts`
+- `docs/CODER-CONTEXT.md`
+
+### Verification
+- `npm run build` ✅
+- Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
+
+### Git
+- Commit: `<pending>`
+- Push: `<pending>`
+
 ## 2026-03-03
 
 ### Task
@@ -184,23 +240,39 @@ Add an end-to-end onboarding smoke test, add shared provisioning entrypoint (`pr
   - Emits machine-readable `SMOKE_RESULT_JSON=...` summary.
 - Updated `package.json` scripts:
   - Added `smoke:onboarding-e2e` -> `tsx scripts/smoke-onboarding-e2e.ts`.
+- Polished live phone-onboarding conversational flow (without touching frozen voice core files):
+  - Updated `src/onboarding-call-handler.ts` to:
+    - Open with the required Autom8 greeting line.
+    - Collect the requested intake fields conversationally, including explicit `call_handling`.
+    - Confirm with exact phrase `"Let me make sure I got everything right..."`.
+    - Sign off with exact phrase `"You're all set! Someone from our team will reach out within 24 hours. Thanks for choosing Autom8!"`.
+    - Keep tone instructions at 2-3 short sentences per turn, casual/friendly/efficient.
+  - Updated `src/onboarding-session-store.ts` field schema to include `call_handling` as a required onboarding field.
+  - Updated `src/onboarding-tools.ts` to persist captured `call_handling` into `onboarding_sessions.booking_instructions` during provisioning session creation.
+- Added migration `sql/008-onboarding-call-handling-field.sql` to allow `call_handling` in `onboarding_fields.field_name` constraint.
+  - Applied migration against production DB (`neon-cadence-db`) with safe table-existence guard.
 
 ### Files touched
 - `src/onboarding-prompt.ts`
 - `src/provision-client.ts`
+- `src/onboarding-call-handler.ts`
+- `src/onboarding-session-store.ts`
+- `src/onboarding-tools.ts`
 - `scripts/smoke-onboarding-e2e.ts`
+- `sql/008-onboarding-call-handling-field.sql`
 - `package.json`
 - `docs/CODER-CONTEXT.md`
 
 ### Verification
 - `npm run build` ✅
-- `npx tsx scripts/smoke-onboarding-e2e.ts` ✅
-  - onboarding tenant lookup ✅
+- `npm run smoke:onboarding-e2e` ✅
+  - onboarding tenant lookup (`+14806313993`) ✅
   - onboarding prompt polish/update ✅
   - onboarding `/incoming-call` TwiML ✅
-  - DVDS `/incoming-call` TwiML ✅
+  - DVDS `/incoming-call` TwiML (`+19284477047`) ✅
   - `provision-client.ts` dry-run call ✅
   - Twilio available-number API call ✅
+- SQL migration apply run (`sql/008-onboarding-call-handling-field.sql`) ✅
 - Frozen voice files unchanged (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
 
 ### Git

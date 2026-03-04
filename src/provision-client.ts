@@ -1,4 +1,5 @@
 import { writeAuditLog } from "./audit";
+import { generatePostOnboardingCheckoutLink } from "./billing-checkout";
 import { pool } from "./db";
 import { generateSystemPrompt } from "./prompt-template";
 import { sendSms } from "./sms";
@@ -45,6 +46,8 @@ export interface ProvisionClientResult {
   systemPrompt: string;
   plan: ProvisionPlan;
   trialEndsAt: string | null;
+  billingCheckoutUrl: string | null;
+  billingCheckoutSessionId: string | null;
 }
 
 function defaultGreeting(businessName: string): string {
@@ -83,12 +86,15 @@ function validateRequired(input: ProvisionClientInput): void {
   }
 }
 
-async function sendWelcomeSms(ownerPhone: string, twilioNumber: string): Promise<void> {
-  await sendSms(
-    ownerPhone,
-    twilioNumber,
-    `Your Cadence line is live at ${twilioNumber}. Forward your business calls to this number to go live. Reply if you need setup help.`
-  );
+async function sendWelcomeSms(
+  ownerPhone: string,
+  twilioNumber: string,
+  checkoutSmsBody?: string | null
+): Promise<void> {
+  const baseMessage = `Your Cadence line is live at ${twilioNumber}. Forward your business calls to this number to go live.`;
+  const body = checkoutSmsBody ? `${baseMessage} ${checkoutSmsBody}` : `${baseMessage} Reply if you need setup help.`;
+
+  await sendSms(ownerPhone, twilioNumber, body);
 }
 
 export async function provisionClient(
@@ -127,7 +133,9 @@ export async function provisionClient(
       greeting,
       systemPrompt,
       plan,
-      trialEndsAt
+      trialEndsAt,
+      billingCheckoutUrl: null,
+      billingCheckoutSessionId: null
     };
   }
 
@@ -188,8 +196,31 @@ export async function provisionClient(
     source: "provision-client"
   });
 
+  let billingCheckoutUrl: string | null = null;
+  let billingCheckoutSessionId: string | null = null;
+  let checkoutSmsBody: string | null = null;
+
+  if (input.ownerEmail) {
+    try {
+      const checkout = await generatePostOnboardingCheckoutLink(clientId, input.ownerEmail);
+      billingCheckoutUrl = checkout.checkoutUrl;
+      billingCheckoutSessionId = checkout.checkoutSessionId;
+      checkoutSmsBody = checkout.smsBody;
+
+      await writeAuditLog("client", clientId, "billing_checkout_created", {
+        checkoutSessionId: checkout.checkoutSessionId
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown billing checkout error";
+      console.error(`[PROVISION] failed to create billing checkout for client ${clientId}`, err);
+      await writeAuditLog("client", clientId, "billing_checkout_failed", {
+        error: message
+      });
+    }
+  }
+
   if (input.ownerPhone && !options.skipWelcomeSms) {
-    await sendWelcomeSms(input.ownerPhone, number.phoneNumber);
+    await sendWelcomeSms(input.ownerPhone, number.phoneNumber, checkoutSmsBody);
   }
 
   return {
@@ -201,6 +232,8 @@ export async function provisionClient(
     greeting,
     systemPrompt,
     plan,
-    trialEndsAt
+    trialEndsAt,
+    billingCheckoutUrl,
+    billingCheckoutSessionId
   };
 }

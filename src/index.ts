@@ -6,11 +6,14 @@ import { OnboardingCallHandler } from "./onboarding-call-handler";
 import { getClientByPhone, isTrialExpired } from "./db";
 import { getTenantRuntimeConfig } from "./tenant-config";
 import { handleStripeWebhook } from "./stripe";
+import { getDeactivationReason, renderTemporarilyUnavailableTwiml } from "./deactivation-policy";
 import onboardingRouter from "./onboarding";
 
 const app = express();
 
-app.post("/webhook/stripe", express.raw({ type: "application/json" }), handleStripeWebhook);
+const stripeWebhookRaw = express.raw({ type: "application/json" });
+app.post("/stripe-webhook", stripeWebhookRaw, handleStripeWebhook);
+app.post("/webhook/stripe", stripeWebhookRaw, handleStripeWebhook);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use("/api/onboarding", onboardingRouter);
@@ -31,10 +34,11 @@ app.post("/incoming-call", async (req, res) => {
       .send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>This number is not currently active. Goodbye.</Say><Hangup/></Response>');
   }
 
-  if (!client.active || isTrialExpired(client)) {
+  const deactivationReason = getDeactivationReason(client, isTrialExpired(client));
+  if (deactivationReason) {
     return res
       .type("text/xml")
-      .send('<?xml version="1.0" encoding="UTF-8"?><Response><Say>This service is currently unavailable.</Say><Hangup/></Response>');
+      .send(renderTemporarilyUnavailableTwiml(client.business_name));
   }
 
   const streamUrl = process.env.TWILIO_WEBSOCKET_URL;

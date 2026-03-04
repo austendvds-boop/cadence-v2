@@ -9,6 +9,11 @@ import {
   type OnboardingFieldName,
   ONBOARDING_FIELD_NAMES
 } from "./onboarding-session-store";
+import {
+  ONBOARDING_CONFIRMATION_LINE,
+  ONBOARDING_GREETING,
+  ONBOARDING_SIGN_OFF
+} from "./onboarding-prompt";
 import type { ClientConfig } from "./call-handler";
 
 type HistoryMessage = { role: "user" | "assistant"; content: string };
@@ -32,6 +37,7 @@ const INTERVIEW_FIELD_ORDER: OnboardingFieldName[] = [
   "hours",
   "services",
   "faqs",
+  "call_handling",
   "transfer_number",
   "email"
 ];
@@ -39,21 +45,23 @@ const INTERVIEW_FIELD_ORDER: OnboardingFieldName[] = [
 const FIELD_LABELS: Record<OnboardingFieldName, string> = {
   business_name: "business name",
   type: "business type",
-  hours: "hours",
-  services: "services",
-  faqs: "frequently asked questions",
+  hours: "business hours",
+  services: "services and pricing",
+  faqs: "common caller questions",
+  call_handling: "call handling instructions",
   transfer_number: "transfer number",
-  email: "email"
+  email: "best contact email"
 };
 
 const FIELD_PROMPTS: Record<OnboardingFieldName, string> = {
-  business_name: "What is your business name?",
-  type: "What type of business do you run?",
+  business_name: "Great, what's your business name?",
+  type: "Nice, what type of business do you run?",
   hours: "What are your normal business hours?",
-  services: "What are the main services you want callers to hear about?",
-  faqs: "What are the top questions callers ask and how should Cadence answer them?",
-  transfer_number: "What number should calls transfer to when someone asks for a human? You can say skip if you don't want transfers.",
-  email: "What's the best email for setup updates and receipts?"
+  services: "What services or products do you want callers to hear about, and what do they usually cost?",
+  faqs: "What are the most common questions callers ask your team?",
+  call_handling: "How should Cadence handle calls overall — take messages, book appointments, transfer calls, or something else?",
+  transfer_number: "If you want live transfers, what number should we use? You can say skip if you don't want transfers.",
+  email: "What's the best contact email for setup updates and receipts?"
 };
 
 const CONFIRM_YES_REGEX = /\b(yes|yep|yeah|correct|sounds good|looks good|confirm|proceed|do it|go ahead)\b/i;
@@ -61,8 +69,8 @@ const CONFIRM_NO_REGEX = /\b(no|nope|change|edit|update|fix|wrong|not right)\b/i
 const TRANSFER_SKIP_REGEX = /\b(skip|none|no transfer|don't transfer|do not transfer|n\/a)\b/i;
 
 const ONBOARDING_TONE_PROMPT = `You are Cadence, a friendly onboarding specialist helping a business owner set up a phone receptionist.
-Speak casually, warm, and confident.
-Keep every reply to one or two short sentences.
+Speak casually, warm, and efficient.
+Keep every reply to 2-3 short sentences max.
 Always end with a clear next question or action.
 Never output markdown, JSON, bullet points, or stage directions.`;
 
@@ -77,8 +85,9 @@ function detectFieldMention(text: string): OnboardingFieldName | null {
   if (/business name|company name|name of (the )?business/.test(input)) return "business_name";
   if (/business type|industry|type of business/.test(input)) return "type";
   if (/hours|open|schedule|availability/.test(input)) return "hours";
-  if (/services|offerings|what we do/.test(input)) return "services";
+  if (/services|offerings|what we do|pricing|prices/.test(input)) return "services";
   if (/faq|questions|common questions/.test(input)) return "faqs";
+  if (/handle calls|call handling|book|appointments|take messages/.test(input)) return "call_handling";
   if (/transfer|forward|live person|human/.test(input)) return "transfer_number";
   if (/email|e-mail/.test(input)) return "email";
 
@@ -142,10 +151,7 @@ export class OnboardingCallHandler {
     this.stage = "interview";
     await onboardingSessionStore.setStatus(this.callSid, "interview");
 
-    await this.speakText(
-      "Hey! Thanks for calling Cadence onboarding. I'll ask a few quick questions so we can set up your line. " +
-        FIELD_PROMPTS.business_name
-    );
+    await this.speakText(`${ONBOARDING_GREETING} ${FIELD_PROMPTS.business_name}`);
   }
 
   private onMedia(msg: TwilioMessage): void {
@@ -263,7 +269,7 @@ Use natural conversational language.`;
 
     if (CONFIRM_NO_REGEX.test(callerText)) {
       await this.speakText(
-        "No problem. Tell me which detail to change: business name, type, hours, services, FAQs, transfer number, or email."
+        "No problem. Tell me which detail to change: business name, type, hours, services, FAQs, call handling, transfer number, or email."
       );
       return;
     }
@@ -285,22 +291,9 @@ Use natural conversational language.`;
       return `${FIELD_LABELS[field]}: ${value}`;
     }).join("; ");
 
-    const systemPrompt = `${ONBOARDING_TONE_PROMPT}
-You're at the confirmation step.
-Read back these captured details naturally and ask for yes/no confirmation to start provisioning.
-Captured details: ${summaryParts}`;
-
-    const response = await chat(systemPrompt, this.conversationHistory.slice(-6));
-    const spoken = normalizeSpeech(response);
-
-    if (/could you repeat/i.test(spoken) || spoken.length < 12) {
-      await this.speakText(
-        `Awesome, here's what I captured: ${summaryParts}. Say yes to start provisioning now, or tell me what to change.`
-      );
-      return;
-    }
-
-    await this.speakText(spoken);
+    await this.speakText(
+      `${ONBOARDING_CONFIRMATION_LINE} Here's what I captured: ${summaryParts}. Does that all sound right, or what should I change?`
+    );
   }
 
   private async startProvisioning(): Promise<void> {
@@ -332,9 +325,7 @@ Captured details: ${summaryParts}`;
     }
 
     this.stage = "done";
-    await this.speakText(
-      "Perfect, I've started provisioning your Cadence setup now. We'll follow up with updates as it completes."
-    );
+    await this.speakText(ONBOARDING_SIGN_OFF);
   }
 
   private normalizeCapturedValue(field: OnboardingFieldName, value: string): string {

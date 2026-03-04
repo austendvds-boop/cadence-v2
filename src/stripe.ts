@@ -1,8 +1,9 @@
 import { Request, Response } from "express";
 import Stripe from "stripe";
-import { getClientByStripeCustomer, getClientByStripeSubscription, pool, setClientActive } from "./db";
+import { pool } from "./db";
 import { runProvisioningForOnboarding } from "./provisioning";
 import { writeAuditLog } from "./audit";
+import { handleWebhookEvent } from "./billing-service";
 
 function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -44,10 +45,13 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
       return;
     }
 
+    const billingResult = await handleWebhookEvent(event);
+
     switch (event.type) {
       case "checkout.session.completed": {
         const checkout = event.data.object as Stripe.Checkout.Session;
         const onboardingSessionId = checkout.metadata?.onboarding_session_id;
+
         if (onboardingSessionId) {
           await pool.query(
             `UPDATE onboarding_sessions
@@ -76,44 +80,43 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
         }
         break;
       }
+
       case "invoice.paid": {
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
-        if (customerId) {
-          const client = await getClientByStripeCustomer(customerId);
-          if (client) {
-            await setClientActive(client.id, true);
-            await writeAuditLog("client", client.id, "invoice_paid", { stripeEventId: event.id });
-          }
+        if (billingResult.clientId) {
+          await writeAuditLog("client", billingResult.clientId, "invoice_paid", {
+            stripeEventId: event.id
+          });
         }
         break;
       }
+
       case "invoice.payment_failed": {
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = typeof invoice.customer === "string" ? invoice.customer : null;
-        if (customerId) {
-          const client = await getClientByStripeCustomer(customerId);
-          if (client) {
-            await setClientActive(client.id, false);
-            await writeAuditLog("client", client.id, "payment_failed", { stripeEventId: event.id });
-          }
+        if (billingResult.clientId) {
+          await writeAuditLog("client", billingResult.clientId, "payment_failed", {
+            stripeEventId: event.id
+          });
         }
         break;
       }
+
       case "customer.subscription.deleted": {
-        const subscription = event.data.object as Stripe.Subscription;
-        const client = await getClientByStripeSubscription(subscription.id);
-        if (client) {
-          await setClientActive(client.id, false);
-          await writeAuditLog("client", client.id, "subscription_deleted", { stripeEventId: event.id });
+        if (billingResult.clientId) {
+          await writeAuditLog("client", billingResult.clientId, "subscription_deleted", {
+            stripeEventId: event.id
+          });
         }
         break;
       }
+
       default:
         break;
     }
 
-    res.status(200).json({ received: true });
+    res.status(200).json({
+      received: true,
+      billingProcessed: billingResult.processed,
+      billingDuplicate: billingResult.duplicate
+    });
   } catch (err) {
     console.error("[STRIPE] webhook processing failed", err);
     res.status(500).send("Webhook processing failed");

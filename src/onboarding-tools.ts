@@ -70,6 +70,7 @@ async function createProvisioningSession(callSession: OnboardingCallSessionState
   const hours = (fields.hours || "Hours not provided yet").trim();
   const services = (fields.services || "Services will be finalized after setup call").trim();
   const faqs = (fields.faqs || "FAQs will be finalized after setup call").trim();
+  const callHandling = (fields.call_handling || "Take a message and return the call").trim();
 
   const transferNumber = toOptional(fields.transfer_number);
   const ownerEmail = (fields.email || "owner@example.com").trim().toLowerCase();
@@ -115,7 +116,7 @@ async function createProvisioningSession(callSession: OnboardingCallSessionState
       hours,
       services,
       faqs,
-      "Collect caller details and schedule a follow-up onboarding call.",
+      callHandling,
       transferNumber,
       null,
       greeting,
