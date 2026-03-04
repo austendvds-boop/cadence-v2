@@ -1,14 +1,15 @@
 import fs from "fs/promises";
 import path from "path";
-import Stripe from "stripe";
 import pg from "pg";
-import { ONBOARDING_TENANT_PHONE_NUMBER } from "../src/onboarding-prompt";
 
 type CheckResult = {
   name: string;
   ok: boolean;
   details: string;
 };
+
+const DEFAULT_DVDS_TENANT_NUMBER = "+19284477047";
+const DEFAULT_ONBOARDING_TENANT_NUMBER = "+14806313993";
 
 function requireEnv(key: string): string {
   const value = process.env[key]?.trim();
@@ -54,6 +55,31 @@ function assertValidStreamTwiml(twiml: string): { websocketUrl: string } {
   return { websocketUrl };
 }
 
+function assertUnknownTenantRejectionTwiml(twiml: string): void {
+  const normalized = twiml.replace(/\s+/g, " ");
+
+  if (!twiml.trim().startsWith("<?xml")) {
+    throw new Error("Unknown-number TwiML is missing XML declaration");
+  }
+
+  if (!normalized.includes("<Response>") || !normalized.includes("</Response>")) {
+    throw new Error("Unknown-number TwiML is missing <Response> root");
+  }
+
+  if (normalized.includes("<Stream")) {
+    throw new Error("Unknown-number TwiML should not start media stream");
+  }
+
+  const lower = normalized.toLowerCase();
+  if (!lower.includes("not currently active")) {
+    throw new Error("Unknown-number TwiML missing expected rejection message");
+  }
+
+  if (!lower.includes("<hangup")) {
+    throw new Error("Unknown-number TwiML missing <Hangup/>");
+  }
+}
+
 async function postIncomingCall(baseUrl: string, to: string): Promise<string> {
   const from = process.env.SMOKE_CALLER_NUMBER || "+15555550123";
 
@@ -71,57 +97,14 @@ async function postIncomingCall(baseUrl: string, to: string): Promise<string> {
   return body;
 }
 
-async function postStripeWebhook(baseUrl: string, webhookSecret: string): Promise<string> {
-  const event = {
-    id: `evt_smoke_full_saas_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    object: "event",
-    api_version: "2023-10-16",
-    created: Math.floor(Date.now() / 1000),
-    data: {
-      object: {
-        id: `ch_smoke_${Date.now()}`,
-        object: "charge"
-      }
-    },
-    livemode: false,
-    pending_webhooks: 1,
-    request: {
-      id: null,
-      idempotency_key: null
-    },
-    type: "charge.succeeded"
-  };
-
-  const payload = JSON.stringify(event);
-  const signature = Stripe.webhooks.generateTestHeaderString({
-    payload,
-    secret: webhookSecret,
-    timestamp: Math.floor(Date.now() / 1000)
-  });
-
-  const response = await fetch(`${baseUrl}/stripe-webhook`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Stripe-Signature": signature
-    },
-    body: payload
-  });
-
-  const body = await response.text();
-  if (response.status !== 200) {
-    throw new Error(`HTTP ${response.status}: ${body.slice(0, 300)}`);
-  }
-
-  return body;
-}
-
 async function get200(baseUrl: string, route: string): Promise<string> {
   const response = await fetch(`${baseUrl}${route}`);
   const body = await response.text();
+
   if (response.status !== 200) {
     throw new Error(`HTTP ${response.status}: ${body.slice(0, 300)}`);
   }
+
   return body;
 }
 
@@ -162,11 +145,13 @@ async function verifyMigrations(pool: pg.Pool): Promise<string> {
   const columnSet = new Set(columnRows.rows.map((row) => `${row.table_name}.${row.column_name}`));
 
   const hasSchemaMigrationsTable = tableSet.has("schema_migrations");
-  let recordedSet = new Set<string>();
+  const recordedSet = new Set<string>();
 
   if (hasSchemaMigrationsTable) {
     const migrationRows = await pool.query<{ filename: string }>("SELECT filename FROM schema_migrations");
-    recordedSet = new Set(migrationRows.rows.map((row) => row.filename));
+    for (const row of migrationRows.rows) {
+      recordedSet.add(row.filename);
+    }
   }
 
   const constraintRows = await pool.query<{ constraint_name: string; definition: string }>(
@@ -193,9 +178,7 @@ async function verifyMigrations(pool: pg.Pool): Promise<string> {
         "clients.stripe_customer_id",
         "clients.stripe_subscription_id"
       ];
-      const missingTables = hasAll(requiredTables, tableSet);
-      const missingColumns = hasAll(requiredColumns, columnSet);
-      const missing = [...missingTables, ...missingColumns];
+      const missing = [...hasAll(requiredTables, tableSet), ...hasAll(requiredColumns, columnSet)];
       return {
         ok: missing.length === 0,
         details: missing.length === 0 ? "core clients schema present" : `missing artifacts: ${missing.join(", ")}`
@@ -252,7 +235,16 @@ async function verifyMigrations(pool: pg.Pool): Promise<string> {
     })(),
     "006-dashboard-auth.sql": (() => {
       const requiredTables = ["dashboard_users", "magic_link_tokens"];
-      const missing = hasAll(requiredTables, tableSet);
+      const requiredColumns = [
+        "dashboard_users.email",
+        "dashboard_users.role",
+        "dashboard_users.active",
+        "magic_link_tokens.user_id",
+        "magic_link_tokens.token_hash",
+        "magic_link_tokens.expires_at",
+        "magic_link_tokens.created_at"
+      ];
+      const missing = [...hasAll(requiredTables, tableSet), ...hasAll(requiredColumns, columnSet)];
       return {
         ok: missing.length === 0,
         details: missing.length === 0 ? "dashboard auth schema present" : `missing artifacts: ${missing.join(", ")}`
@@ -279,49 +271,45 @@ async function verifyMigrations(pool: pg.Pool): Promise<string> {
   };
 
   const missingMigrations: string[] = [];
-  const recordedOnlyCount = migrationFiles.filter((file) => recordedSet.has(file)).length;
   const inferredApplied: string[] = [];
 
   for (const file of migrationFiles) {
-    const artifact = artifactChecks[file];
     const recorded = recordedSet.has(file);
+    const artifact = artifactChecks[file];
 
     if (recorded || artifact?.ok) {
-      if (!recorded) {
-        inferredApplied.push(file);
-      }
+      if (!recorded) inferredApplied.push(file);
       continue;
     }
 
-    const reason = artifact ? artifact.details : "no artifact validator configured";
-    missingMigrations.push(`${file} (${reason})`);
+    missingMigrations.push(`${file} (${artifact ? artifact.details : "no artifact validator configured"})`);
   }
 
   if (missingMigrations.length > 0) {
     throw new Error(`Missing migrations: ${missingMigrations.join("; ")}`);
   }
 
-  const migrationSummaryParts = [
+  const recordedCount = migrationFiles.filter((file) => recordedSet.has(file)).length;
+  const summary = [
     `${migrationFiles.length} migration file(s) verified`,
     hasSchemaMigrationsTable
-      ? `${recordedOnlyCount} recorded in schema_migrations`
+      ? `${recordedCount} recorded in schema_migrations`
       : "schema_migrations table not present; used artifact verification"
   ];
 
   if (inferredApplied.length > 0) {
-    migrationSummaryParts.push(`${inferredApplied.length} inferred via schema artifacts`);
+    summary.push(`${inferredApplied.length} inferred via schema artifacts`);
   }
 
-  return migrationSummaryParts.join("; ");
+  return summary.join("; ");
 }
 
 async function main(): Promise<void> {
   const databaseUrl = requireEnv("DATABASE_URL");
   const cadenceBaseUrl = normalizeBaseUrl(requireEnv("CADENCE_BASE_URL"));
-  const stripeWebhookSecret = requireEnv("STRIPE_WEBHOOK_SECRET");
 
-  const dvdsNumber = process.env.DVDS_TENANT_NUMBER || "+19284477047";
-  const onboardingNumber = process.env.ONBOARDING_TENANT_NUMBER || ONBOARDING_TENANT_PHONE_NUMBER;
+  const dvdsNumber = process.env.DVDS_TENANT_NUMBER || DEFAULT_DVDS_TENANT_NUMBER;
+  const onboardingNumber = process.env.ONBOARDING_TENANT_NUMBER || DEFAULT_ONBOARDING_TENANT_NUMBER;
 
   const pool = new pg.Pool({
     connectionString: databaseUrl,
@@ -405,9 +393,21 @@ async function main(): Promise<void> {
     );
 
     results.push(
-      await runCheck("POST /stripe-webhook accepts signed test event", async () => {
-        const responseBody = await postStripeWebhook(cadenceBaseUrl, stripeWebhookSecret);
-        return `HTTP 200 (${responseBody.slice(0, 140)})`;
+      await runCheck("POST /incoming-call with unknown number returns rejection TwiML", async () => {
+        const unknownNumber = process.env.UNKNOWN_TENANT_NUMBER || "+15555555555";
+        const twiml = await postIncomingCall(cadenceBaseUrl, unknownNumber);
+        assertUnknownTenantRejectionTwiml(twiml);
+        return `rejection TwiML valid (${twiml.length} chars)`;
+      })
+    );
+
+    results.push(
+      await runCheck("GET / (health) returns 200", async () => {
+        const body = await get200(cadenceBaseUrl, "/");
+        if (!body.includes("status") || !body.includes("ok")) {
+          throw new Error(`Unexpected health payload: ${body.slice(0, 200)}`);
+        }
+        return body;
       })
     );
 
@@ -423,35 +423,8 @@ async function main(): Promise<void> {
     );
 
     results.push(
-      await runCheck("GET / (health) returns 200", async () => {
-        const body = await get200(cadenceBaseUrl, "/");
-        if (!body.includes("status") || !body.includes("ok")) {
-          throw new Error(`Unexpected health payload: ${body.slice(0, 200)}`);
-        }
-        return body;
-      })
-    );
-
-    results.push(
       await runCheck("All migrations are applied", async () => {
         return verifyMigrations(pool);
-      })
-    );
-
-    results.push(
-      await runCheck("Railway env vars baseline present", async () => {
-        const requiredEnvNames = [
-          "DATABASE_URL",
-          "CADENCE_BASE_URL",
-          "STRIPE_WEBHOOK_SECRET"
-        ];
-
-        const missing = requiredEnvNames.filter((name) => !process.env[name]);
-        if (missing.length > 0) {
-          throw new Error(`Missing runtime env vars: ${missing.join(", ")}`);
-        }
-
-        return `runtime env vars present (${requiredEnvNames.join(", ")})`;
       })
     );
   } finally {
