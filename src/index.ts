@@ -2,7 +2,8 @@ import express from "express";
 import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import { CallHandler } from "./call-handler";
-import { getClientById, getClientByPhone, isTrialExpired } from "./db";
+import { getClientByPhone, isTrialExpired } from "./db";
+import { getTenantRuntimeConfig } from "./tenant-config";
 import { handleStripeWebhook } from "./stripe";
 import onboardingRouter from "./onboarding";
 
@@ -71,22 +72,22 @@ wss.on("connection", (ws) => {
           return;
         }
 
-        const client = await getClientById(clientId);
-        if (!client) {
+        const tenantConfig = await getTenantRuntimeConfig(clientId);
+        if (!tenantConfig) {
           ws.close();
           return;
         }
 
         handler = new CallHandler(ws, {
-          clientId: client.id,
-          businessName: client.business_name,
-          systemPrompt: client.system_prompt,
-          transferNumber: client.transfer_number,
-          greeting: client.greeting,
-          smsEnabled: client.sms_enabled,
-          bookingUrl: client.booking_url,
-          ownerPhone: client.owner_phone,
-          twilioNumber: client.phone_number
+          clientId: tenantConfig.clientId,
+          businessName: tenantConfig.businessName,
+          systemPrompt: tenantConfig.systemPrompt,
+          transferNumber: tenantConfig.transferNumber,
+          greeting: tenantConfig.greeting,
+          smsEnabled: tenantConfig.smsEnabled,
+          bookingUrl: tenantConfig.bookingUrl,
+          ownerPhone: tenantConfig.ownerPhone,
+          twilioNumber: tenantConfig.twilioNumber
         });
       }
 
