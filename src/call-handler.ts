@@ -40,6 +40,7 @@ export class CallHandler {
   private callSummary: string[] = [];
   private callerPhone = "unknown";
   private bookingLinkSent = false;
+  private callStartedAt = new Date();
 
   constructor(
     private readonly ws: WebSocket,
@@ -67,6 +68,7 @@ export class CallHandler {
     this.streamSid = msg.start?.streamSid || msg.streamSid || "unknown";
     const params = msg.start?.customParameters || {};
     this.callerPhone = params.from || params.From || params.caller || "unknown";
+    this.callStartedAt = new Date();
 
     this.dgConnection = createLiveSTT(async (transcript) => {
       await this.onTranscript(transcript);
@@ -137,19 +139,29 @@ export class CallHandler {
       console.error(`[CALL:${this.streamSid}] stt close failed`, err);
     }
 
-    if (!this.client.ownerPhone) return;
-
-    try {
-      await sendCallSummary(
-        this.callerPhone,
-        this.callSummary.slice(-10),
-        this.client.ownerPhone,
-        this.client.twilioNumber,
-        this.client.businessName
-      );
-    } catch (err) {
-      console.error(`[CALL:${this.streamSid}] summary sms failed`, err);
+    if (this.client.ownerPhone) {
+      try {
+        await sendCallSummary(
+          this.callerPhone,
+          this.callSummary.slice(-10),
+          this.client.ownerPhone,
+          this.client.twilioNumber,
+          this.client.businessName
+        );
+      } catch (err) {
+        console.error(`[CALL:${this.streamSid}] summary sms failed`, err);
+      }
     }
+
+    await emitCallEnded({
+      client: this.client,
+      streamSid: this.streamSid,
+      callerPhone: this.callerPhone,
+      startedAt: this.callStartedAt,
+      endedAt: new Date(),
+      conversationHistory: [...this.conversationHistory],
+      callSummary: [...this.callSummary]
+    });
   }
 
   private sendAudio(base64Payload: string): void {
@@ -161,5 +173,33 @@ export class CallHandler {
         media: { payload: base64Payload }
       })
     );
+  }
+}
+
+export interface CallEndedEvent {
+  client: ClientConfig;
+  streamSid: string;
+  callerPhone: string;
+  startedAt: Date;
+  endedAt: Date;
+  conversationHistory: Array<{ role: "user" | "assistant"; content: string }>;
+  callSummary: string[];
+}
+
+export type CallEndedHook = (event: CallEndedEvent) => Promise<void> | void;
+
+let callEndedHook: CallEndedHook | null = null;
+
+export function setCallEndedHook(hook: CallEndedHook | null): void {
+  callEndedHook = hook;
+}
+
+async function emitCallEnded(event: CallEndedEvent): Promise<void> {
+  if (!callEndedHook) return;
+
+  try {
+    await callEndedHook(event);
+  } catch (err) {
+    console.error(`[CALL:${event.streamSid}] call end hook failed`, err);
   }
 }

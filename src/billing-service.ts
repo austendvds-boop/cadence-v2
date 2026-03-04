@@ -22,6 +22,7 @@ export interface BillingWebhookResult {
   processed: boolean;
   duplicate: boolean;
   clientId: string | null;
+  reactivatedAfterFailure?: boolean;
 }
 
 function getStripe(): Stripe {
@@ -281,6 +282,15 @@ async function upsertBillingSubscriptionFromInvoice(
   );
 }
 
+async function hadPreviousPaymentFailure(clientId: string): Promise<boolean> {
+  const result = await pool.query<{ last_payment_status: string | null }>(
+    "SELECT last_payment_status FROM billing_subscriptions WHERE client_id = $1 LIMIT 1",
+    [clientId]
+  );
+
+  return result.rows[0]?.last_payment_status === "failed";
+}
+
 export async function createCheckoutSession(clientId: string, email: string): Promise<CheckoutSessionResult> {
   const client = await getClientById(clientId);
   if (!client) {
@@ -429,11 +439,12 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<BillingWe
       const invoice = event.data.object as Stripe.Invoice;
       const stripeCustomerId = typeof invoice.customer === "string" ? invoice.customer : null;
       const stripeSubscriptionId = getInvoiceSubscriptionId(invoice);
+      const isInvoicePaid = event.type === "invoice.paid";
 
       const client = await resolveClient(null, stripeCustomerId, stripeSubscriptionId);
       const clientId = client?.id ?? null;
 
-      if (!clientId) {
+      if (!clientId || !client) {
         return {
           processed: true,
           duplicate: false,
@@ -441,19 +452,24 @@ export async function handleWebhookEvent(event: Stripe.Event): Promise<BillingWe
         };
       }
 
+      const reactivatedAfterFailure = isInvoicePaid
+        ? !client.active && (await hadPreviousPaymentFailure(clientId))
+        : false;
+
       await syncClientStripeRefs(clientId, stripeCustomerId, stripeSubscriptionId);
       await upsertBillingSubscriptionFromInvoice(
         clientId,
         invoice,
-        event.type === "invoice.paid" ? "paid" : "failed"
+        isInvoicePaid ? "paid" : "failed"
       );
-      await setClientActive(clientId, event.type === "invoice.paid");
+      await setClientActive(clientId, isInvoicePaid);
       await attachBillingEventClient(event.id, clientId);
 
       return {
         processed: true,
         duplicate: false,
-        clientId
+        clientId,
+        reactivatedAfterFailure
       };
     }
 

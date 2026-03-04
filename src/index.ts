@@ -3,6 +3,7 @@ import { WebSocketServer } from "ws";
 import { createServer } from "http";
 import { CallHandler } from "./call-handler";
 import { OnboardingCallHandler } from "./onboarding-call-handler";
+import { registerCallLogger } from "./call-logger";
 import { getClientByPhone, isTrialExpired } from "./db";
 import { getTenantRuntimeConfig } from "./tenant-config";
 import { handleStripeWebhook } from "./stripe";
@@ -10,6 +11,8 @@ import { getDeactivationReason, renderTemporarilyUnavailableTwiml } from "./deac
 import onboardingRouter from "./onboarding";
 
 const app = express();
+
+registerCallLogger();
 
 const stripeWebhookRaw = express.raw({ type: "application/json" });
 app.post("/stripe-webhook", stripeWebhookRaw, handleStripeWebhook);

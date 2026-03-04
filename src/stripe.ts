@@ -83,9 +83,16 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
 
       case "invoice.paid": {
         if (billingResult.clientId) {
-          await writeAuditLog("client", billingResult.clientId, "invoice_paid", {
-            stripeEventId: event.id
-          });
+          const reactivatedAfterFailure = Boolean(billingResult.reactivatedAfterFailure);
+          await writeAuditLog(
+            "client",
+            billingResult.clientId,
+            reactivatedAfterFailure ? "invoice_paid_reactivated" : "invoice_paid",
+            {
+              stripeEventId: event.id,
+              reactivatedAfterFailure
+            }
+          );
         }
         break;
       }
