@@ -13,6 +13,7 @@
     "@deepgram/sdk": "^3.12.0",
     "@types/pg": "^8.18.0",
     "express": "^4.21.2",
+    "nodemailer": "^7.0.6",
     "pg": "^8.19.0",
     "stripe": "^20.4.0",
     "tsx": "^4.21.0",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.13.10",
+    "@types/nodemailer": "^7.0.2",
     "@types/ws": "^8.5.14",
     "typescript": "^5.8.2"
   }

@@ -1,5 +1,61 @@
 # Coder Context
 
+## 2026-03-04 (Phase 4a dashboard API + magic link auth)
+
+### Task
+Implement Phase 4a dashboard authentication and API surface: magic-link auth, client dashboard endpoints, admin endpoints, and auth schema migration with seeded platform admin user.
+
+### Changes made
+- Added new migration:
+  - `sql/006-dashboard-auth.sql`
+    - `dashboard_users` table
+    - `magic_link_tokens` table
+    - index set for dashboard auth lookups
+    - platform admin seed for `aust@autom8everything.com`
+- Added dashboard auth router:
+  - `src/dashboard/auth.ts`
+    - `POST /dashboard/auth/request-link`
+    - `GET /dashboard/auth/verify?token=...`
+    - `POST /dashboard/auth/logout`
+    - signed dashboard session cookie handling
+    - admin bypass response for `aust@autom8everything.com`
+    - Gmail credential file parsing (`gmail-autom8.txt`) + SMTP send via nodemailer
+- Added client dashboard API router:
+  - `src/dashboard/client-api.ts`
+    - `GET /dashboard/api/calls`
+    - `GET /dashboard/api/usage`
+    - `PUT /dashboard/api/settings`
+- Added admin dashboard API router:
+  - `src/dashboard/admin-api.ts`
+    - `GET /dashboard/api/admin/clients`
+    - `GET /dashboard/api/admin/export`
+- Updated API wiring:
+  - `src/index.ts`
+    - mounts `/dashboard/auth`
+    - mounts `/dashboard/api/admin`
+    - mounts `/dashboard/api`
+- Updated dependencies:
+  - `package.json`
+    - added `nodemailer`
+    - added `@types/nodemailer`
+
+### Files touched (Phase 4a)
+- `sql/006-dashboard-auth.sql` (new)
+- `src/dashboard/auth.ts` (new)
+- `src/dashboard/client-api.ts` (new)
+- `src/dashboard/admin-api.ts` (new)
+- `src/index.ts`
+- `package.json`
+- `docs/CODER-CONTEXT.md`
+
+### Verification
+- `npm run build` ✅
+- Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
+
+### Git
+- Commit: `<pending>`
+- Push: `<pending>`
+
 ## 2026-03-04 (Phase 3a Stripe billing integration)
 
 ### Task

@@ -9,6 +9,9 @@ import { getTenantRuntimeConfig } from "./tenant-config";
 import { handleStripeWebhook } from "./stripe";
 import { getDeactivationReason, renderTemporarilyUnavailableTwiml } from "./deactivation-policy";
 import onboardingRouter from "./onboarding";
+import dashboardAuthRouter from "./dashboard/auth";
+import dashboardClientApiRouter from "./dashboard/client-api";
+import dashboardAdminApiRouter from "./dashboard/admin-api";
 
 const app = express();
 
@@ -20,6 +23,9 @@ app.post("/webhook/stripe", stripeWebhookRaw, handleStripeWebhook);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use("/api/onboarding", onboardingRouter);
+app.use("/dashboard/auth", dashboardAuthRouter);
+app.use("/dashboard/api/admin", dashboardAdminApiRouter);
+app.use("/dashboard/api", dashboardClientApiRouter);
 
 app.get("/", (_req, res) => {
   res.json({ status: "ok" });
