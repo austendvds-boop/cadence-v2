@@ -53,8 +53,8 @@ Implement Phase 3a billing components: Stripe checkout session generation for po
 - Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
 
 ### Git
-- Commit: `<pending>`
-- Push: `<pending>`
+- Commit: `142e295` — `feat: Stripe billing — checkout, webhooks, auto-deactivation`
+- Push: `origin/main` ✅
 
 ## 2026-03-03
 
