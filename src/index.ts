@@ -12,16 +12,19 @@ import onboardingRouter from "./onboarding";
 import dashboardAuthRouter from "./dashboard/auth";
 import dashboardClientApiRouter from "./dashboard/client-api";
 import dashboardAdminApiRouter from "./dashboard/admin-api";
+import onboardApiRouter from "./api/onboard";
 
 const app = express();
 
 registerCallLogger();
+app.set("trust proxy", 1);
 
 const stripeWebhookRaw = express.raw({ type: "application/json" });
 app.post("/stripe-webhook", stripeWebhookRaw, handleStripeWebhook);
 app.post("/webhook/stripe", stripeWebhookRaw, handleStripeWebhook);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+app.use("/api/onboard", onboardApiRouter);
 app.use("/api/onboarding", onboardingRouter);
 app.use("/dashboard/auth", dashboardAuthRouter);
 app.use("/dashboard/api/admin", dashboardAdminApiRouter);
