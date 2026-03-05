@@ -3,17 +3,8 @@ import { ListenLiveClient } from "@deepgram/sdk";
 import { createLiveSTT } from "./stt";
 import { chat } from "./llm";
 import { speak } from "./tts";
-import { complete_onboarding, save_onboarding_field } from "./onboarding-tools";
-import {
-  onboardingSessionStore,
-  type OnboardingFieldName,
-  ONBOARDING_FIELD_NAMES
-} from "./onboarding-session-store";
-import {
-  ONBOARDING_CONFIRMATION_LINE,
-  ONBOARDING_GREETING,
-  ONBOARDING_SIGN_OFF
-} from "./onboarding-prompt";
+import { send_signup_link } from "./onboarding-tools";
+import { onboardingSessionStore } from "./onboarding-session-store";
 import type { ClientConfig } from "./call-handler";
 
 type HistoryMessage = { role: "user" | "assistant"; content: string };
@@ -29,69 +20,51 @@ type TwilioMessage = {
   };
 };
 
-type OnboardingStage = "greeting" | "interview" | "confirm" | "provision" | "done";
+type OnboardingStage = "greeting" | "demo";
 
-const INTERVIEW_FIELD_ORDER: OnboardingFieldName[] = [
-  "business_name",
-  "type",
-  "hours",
-  "services",
-  "faqs",
-  "call_handling",
-  "transfer_number",
-  "email"
-];
+const SALES_DEMO_GREETING =
+  "Hey! Thanks for calling Automate. I'm Cadence — I'm actually an AI receptionist, and I'm here to show you exactly what I can do for your business. Got any questions for me?";
 
-const FIELD_LABELS: Record<OnboardingFieldName, string> = {
-  business_name: "business name",
-  type: "business type",
-  hours: "business hours",
-  services: "services and pricing",
-  faqs: "common caller questions",
-  call_handling: "call handling instructions",
-  transfer_number: "transfer number",
-  email: "best contact email"
-};
+const SALES_DEMO_SIGNUP_LINE =
+  "Awesome! I'll text you a link to get set up — it takes about 5 minutes. You'll fill out some info about your business and we'll have your own Cadence up and running.";
 
-const FIELD_PROMPTS: Record<OnboardingFieldName, string> = {
-  business_name: "Great, what's your business name?",
-  type: "Nice, what type of business do you run?",
-  hours: "What are your normal business hours?",
-  services: "What services or products do you want callers to hear about, and what do they usually cost?",
-  faqs: "What are the most common questions callers ask your team?",
-  call_handling: "How should Cadence handle calls overall — take messages, book appointments, transfer calls, or something else?",
-  transfer_number: "If you want live transfers, what number should we use? You can say skip if you don't want transfers.",
-  email: "What's the best contact email for setup updates and receipts?"
-};
+const SIGNUP_INTENT_REGEX =
+  /\b(sign\s?up|signup|get started|let'?s do it|i\s*'?m in|ready to start|ready to sign up|send (me )?(the )?link|text (me )?(the )?link|where do i start|how do i start|how do i sign up|set me up)\b/i;
 
-const CONFIRM_YES_REGEX = /\b(yes|yep|yeah|correct|sounds good|looks good|confirm|proceed|do it|go ahead)\b/i;
-const CONFIRM_NO_REGEX = /\b(no|nope|change|edit|update|fix|wrong|not right)\b/i;
-const TRANSFER_SKIP_REGEX = /\b(skip|none|no transfer|don't transfer|do not transfer|n\/a)\b/i;
+const SALES_DEMO_SYSTEM_PROMPT = `You are Cadence, a live SALES DEMO voice agent for the company Autom8.
+In spoken conversation, always say "Automate" (never "Autom8").
+You are NOT collecting intake details anymore.
 
-const ONBOARDING_TONE_PROMPT = `You are Cadence, a friendly onboarding specialist helping a business owner set up a phone receptionist.
-Speak casually, warm, and efficient.
-Keep every reply to 2-3 short sentences max.
-Always end with a clear next question or action.
-Never output markdown, JSON, bullet points, or stage directions.`;
+Conversation rules:
+- 2-3 short sentences max per turn.
+- Casual, friendly, confident, and natural.
+- No markdown, bullets, JSON, or stage directions.
+- Handle objections conversationally without sounding scripted.
+- Your personality is the product demo — be helpful, sharp, and warm.
+
+What to explain:
+- You answer calls 24/7.
+- You handle common customer questions.
+- You text customers links to the business website.
+- You forward important calls to the owner/team.
+
+Pricing response (say this when asked about price):
+"$199 a month, includes call handling, SMS to your customers, and call forwarding. Booking integration is available as an add-on."
+
+If the caller says they're ready to sign up, respond exactly with:
+"${SALES_DEMO_SIGNUP_LINE}"`;
 
 function normalizeSpeech(text: string): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
-  return collapsed || "Sorry, I missed that. Could you say it one more time?";
+  if (!collapsed) {
+    return "Sorry, I missed that. Could you say that one more time?";
+  }
+
+  return collapsed.replace(/\bautom8\b/gi, "Automate");
 }
 
-function detectFieldMention(text: string): OnboardingFieldName | null {
-  const input = text.toLowerCase();
-
-  if (/business name|company name|name of (the )?business/.test(input)) return "business_name";
-  if (/business type|industry|type of business/.test(input)) return "type";
-  if (/hours|open|schedule|availability/.test(input)) return "hours";
-  if (/services|offerings|what we do|pricing|prices/.test(input)) return "services";
-  if (/faq|questions|common questions/.test(input)) return "faqs";
-  if (/handle calls|call handling|book|appointments|take messages/.test(input)) return "call_handling";
-  if (/transfer|forward|live person|human/.test(input)) return "transfer_number";
-  if (/email|e-mail/.test(input)) return "email";
-
-  return null;
+function isSignupIntent(text: string): boolean {
+  return SIGNUP_INTENT_REGEX.test(text);
 }
 
 export class OnboardingCallHandler {
@@ -102,8 +75,7 @@ export class OnboardingCallHandler {
   private conversationHistory: HistoryMessage[] = [];
   private isSpeaking = false;
   private stage: OnboardingStage = "greeting";
-  private fieldCursor = 0;
-  private pendingCorrectionField: OnboardingFieldName | null = null;
+  private signupLinkSent = false;
 
   constructor(
     private readonly ws: WebSocket,
@@ -148,10 +120,10 @@ export class OnboardingCallHandler {
       await this.onTranscript(transcript);
     });
 
-    this.stage = "interview";
+    this.stage = "demo";
     await onboardingSessionStore.setStatus(this.callSid, "interview");
 
-    await this.speakText(`${ONBOARDING_GREETING} ${FIELD_PROMPTS.business_name}`);
+    await this.speakText(SALES_DEMO_GREETING);
   }
 
   private onMedia(msg: TwilioMessage): void {
@@ -171,176 +143,45 @@ export class OnboardingCallHandler {
 
     this.conversationHistory.push({ role: "user", content: callerText });
 
-    if (this.stage === "done" || this.stage === "provision") {
+    if (this.stage !== "demo") {
       return;
     }
 
-    if (this.stage === "confirm") {
-      await this.handleConfirmTurn(callerText);
+    if (isSignupIntent(callerText)) {
+      await this.handleSignupLink();
       return;
     }
 
-    await this.handleInterviewTurn(callerText);
+    const response = await chat(SALES_DEMO_SYSTEM_PROMPT, this.conversationHistory.slice(-12));
+    await this.speakText(response);
   }
 
-  private async handleInterviewTurn(callerText: string): Promise<void> {
-    const currentField = INTERVIEW_FIELD_ORDER[this.fieldCursor];
-    if (!currentField) {
-      this.stage = "confirm";
-      await onboardingSessionStore.setStatus(this.callSid, "confirm");
-      await this.promptConfirmation();
+  private async handleSignupLink(): Promise<void> {
+    if (this.signupLinkSent) {
+      await this.speakText("I already sent it over. Check your texts, and if you want, I can answer anything else right now.");
       return;
     }
 
-    const normalizedValue = this.normalizeCapturedValue(currentField, callerText);
-    const saveResult = await save_onboarding_field({
+    const result = await send_signup_link({
       callSid: this.callSid,
-      field: currentField,
-      value: normalizedValue
+      callerPhone: this.callerPhone,
+      fromPhone: this.client.twilioNumber
     });
 
-    if (!saveResult.ok) {
-      await this.speakText(`I didn't catch your ${FIELD_LABELS[currentField]}. ${FIELD_PROMPTS[currentField]}`);
-      return;
-    }
-
-    this.fieldCursor += 1;
-
-    const nextField = INTERVIEW_FIELD_ORDER[this.fieldCursor];
-    if (!nextField) {
-      this.stage = "confirm";
-      await onboardingSessionStore.setStatus(this.callSid, "confirm");
-      await this.promptConfirmation();
-      return;
-    }
-
-    const followUp = await this.generateInterviewFollowUp(callerText, currentField, normalizedValue, nextField);
-    await this.speakText(followUp);
-  }
-
-  private async generateInterviewFollowUp(
-    callerText: string,
-    capturedField: OnboardingFieldName,
-    capturedValue: string,
-    nextField: OnboardingFieldName
-  ): Promise<string> {
-    const systemPrompt = `${ONBOARDING_TONE_PROMPT}
-You just captured ${FIELD_LABELS[capturedField]} as: "${capturedValue}".
-Now ask for ${FIELD_LABELS[nextField]}.
-Use natural conversational language.`;
-
-    const response = await chat(systemPrompt, this.conversationHistory.slice(-6));
-    const spoken = normalizeSpeech(response);
-
-    if (/could you repeat/i.test(spoken) || spoken.length < 8) {
-      return FIELD_PROMPTS[nextField];
-    }
-
-    const hasQuestion = spoken.includes("?");
-    if (hasQuestion) return spoken;
-
-    return `${spoken} ${FIELD_PROMPTS[nextField]}`;
-  }
-
-  private async handleConfirmTurn(callerText: string): Promise<void> {
-    if (this.pendingCorrectionField) {
-      const normalizedValue = this.normalizeCapturedValue(this.pendingCorrectionField, callerText);
-      await save_onboarding_field({
-        callSid: this.callSid,
-        field: this.pendingCorrectionField,
-        value: normalizedValue
-      });
-      this.pendingCorrectionField = null;
-      await this.promptConfirmation();
-      return;
-    }
-
-    if (CONFIRM_YES_REGEX.test(callerText)) {
-      await this.startProvisioning();
-      return;
-    }
-
-    const requestedField = detectFieldMention(callerText);
-    if (requestedField) {
-      this.pendingCorrectionField = requestedField;
-      await this.speakText(`Got it. What's the updated ${FIELD_LABELS[requestedField]}?`);
-      return;
-    }
-
-    if (CONFIRM_NO_REGEX.test(callerText)) {
-      await this.speakText(
-        "No problem. Tell me which detail to change: business name, type, hours, services, FAQs, call handling, transfer number, or email."
-      );
-      return;
-    }
-
-    await this.speakText("Say yes to start provisioning, or tell me which detail you'd like to change.");
-  }
-
-  private async promptConfirmation(): Promise<void> {
-    const session = await onboardingSessionStore.getSession(this.callSid);
-    if (!session) {
-      await this.speakText("I lost the onboarding details. Let's restart with your business name.");
-      this.stage = "interview";
-      this.fieldCursor = 0;
-      return;
-    }
-
-    const summaryParts = ONBOARDING_FIELD_NAMES.map((field) => {
-      const value = session.fields[field] || "not provided";
-      return `${FIELD_LABELS[field]}: ${value}`;
-    }).join("; ");
-
-    await this.speakText(
-      `${ONBOARDING_CONFIRMATION_LINE} Here's what I captured: ${summaryParts}. Does that all sound right, or what should I change?`
-    );
-  }
-
-  private async startProvisioning(): Promise<void> {
-    this.stage = "provision";
-
-    const result = await complete_onboarding({ callSid: this.callSid });
-
     if (!result.ok) {
-      if (result.status === "missing_fields" && result.missingFields && result.missingFields.length > 0) {
-        const nextMissing = result.missingFields[0];
-        const nextIndex = INTERVIEW_FIELD_ORDER.indexOf(nextMissing);
-
-        this.stage = "interview";
-        this.fieldCursor = nextIndex >= 0 ? nextIndex : 0;
-        await onboardingSessionStore.setStatus(this.callSid, "interview");
-
+      if (result.status === "missing_caller_phone") {
         await this.speakText(
-          `I still need one more detail before provisioning. ${FIELD_PROMPTS[nextMissing]}`
+          "I'm ready to text the signup link, but caller ID didn't come through on this line. Send a quick text to this number and we'll reply with your setup link right away."
         );
         return;
       }
 
-      this.stage = "confirm";
-      await onboardingSessionStore.setStatus(this.callSid, "failed", {
-        provisionError: result.message
-      });
-      await this.speakText("I hit a snag starting provisioning. Let's confirm the details and try again.");
+      await this.speakText("I hit a quick SMS hiccup. Try again in a moment and I'll send it right away.");
       return;
     }
 
-    this.stage = "done";
-    await this.speakText(ONBOARDING_SIGN_OFF);
-  }
-
-  private normalizeCapturedValue(field: OnboardingFieldName, value: string): string {
-    const trimmed = value.trim();
-    if (!trimmed) return "unknown";
-
-    if (field === "transfer_number" && TRANSFER_SKIP_REGEX.test(trimmed)) {
-      return "none";
-    }
-
-    if (field === "email") {
-      return trimmed.toLowerCase();
-    }
-
-    return trimmed;
+    this.signupLinkSent = true;
+    await this.speakText(SALES_DEMO_SIGNUP_LINE);
   }
 
   private async onStop(): Promise<void> {
