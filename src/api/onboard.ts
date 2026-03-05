@@ -33,8 +33,21 @@ function asTrimmedString(value: unknown): string {
 }
 
 function asOptionalString(value: unknown, fallback: string): string {
-  const trimmed = asTrimmedString(value);
-  return trimmed || fallback;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+
+  if (Array.isArray(value)) {
+    const flattened = value
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter(Boolean)
+      .join(", ");
+
+    return flattened || fallback;
+  }
+
+  return fallback;
 }
 
 function isValidEmail(email: string): boolean {
