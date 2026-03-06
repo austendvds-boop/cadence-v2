@@ -335,3 +335,43 @@ Add an end-to-end onboarding smoke test, add shared provisioning entrypoint (`pr
 - Commit: `<pending>`
 - Push: `<pending>`
 
+
+## 2026-03-06 (Portal API endpoints for autom8-everything cross-service access)
+
+### Task
+Add protected `/api/portal` endpoints authenticated by `X-Portal-Secret` for portal-to-cadence cross-service reads/updates.
+
+### Changes made
+- Added new router:
+  - `src/portal-api.ts` (new)
+    - Router-level `requirePortalSecret` middleware using `crypto.timingSafeEqual` with safe length handling.
+    - `GET /tenant/:tenantId`
+      - Returns tenant settings + business profile + hours/services/faqs from `clients`, `client_hours`, `client_services`, `client_faqs`.
+      - 404 when tenant not found.
+    - `PATCH /tenant/:tenantId`
+      - Supports optional updates for `greeting`, `transferNumber`, `bookingUrl`, `timezone`, `businessProfile`, `hours`, `services`, `faqs`.
+      - Uses transaction pattern aligned with dashboard settings updater.
+      - Calls `clearTenantRuntimeConfigCache(tenantId)` after commit.
+      - Returns `{ ok: true, tenant: ... }` with updated settings snapshot.
+    - `GET /tenant/:tenantId/calls`
+      - Supports `limit` (default 50, max 200) and `offset` (default 0).
+      - Returns mapped call session payload + pagination.
+- Updated API wiring:
+  - `src/index.ts`
+    - added `import portalApiRouter from "./portal-api"`
+    - mounted `app.use("/api/portal", portalApiRouter)`
+- Updated env template:
+  - `.env.example`
+    - added:
+      - `# Portal API (cross-service auth from autom8everything.com)`
+      - `PORTAL_API_SECRET=`
+
+### Files touched
+- `src/portal-api.ts` (new)
+- `src/index.ts`
+- `.env.example`
+- `docs/CODER-CONTEXT.md`
+
+### Gotchas
+- The portal secret middleware returns `500` if `PORTAL_API_SECRET` is missing/blank, and `401` for bad/missing `X-Portal-Secret`.
+- Secret comparison is timing-safe and explicitly handles different-length inputs without throwing.

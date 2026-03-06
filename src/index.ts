@@ -13,6 +13,7 @@ import dashboardAuthRouter from "./dashboard/auth";
 import dashboardClientApiRouter from "./dashboard/client-api";
 import dashboardAdminApiRouter from "./dashboard/admin-api";
 import onboardApiRouter from "./api/onboard";
+import portalApiRouter from "./portal-api";
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use("/api/onboarding", onboardingRouter);
 app.use("/dashboard/auth", dashboardAuthRouter);
 app.use("/dashboard/api/admin", dashboardAdminApiRouter);
 app.use("/dashboard/api", dashboardClientApiRouter);
+app.use("/api/portal", portalApiRouter);
 app.use("/dashboard", express.static("public/dashboard"));
 
 app.get("/", (_req, res) => {
