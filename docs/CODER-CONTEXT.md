@@ -1,5 +1,47 @@
 # Coder Context
 
+## 2026-03-07 (Portal API extensions retry: verification + handoff)
+
+### Task
+Finalize `feature/portal-extensions` for portal API enhancements (system prompt support, usage endpoint, test-call endpoint), verify build, and push branch updates.
+
+### Changes made
+- Verified `src/portal-api.ts` includes all requested portal extensions:
+  - Tenant GET now includes `systemPrompt` (`c.system_prompt` selected + serialized)
+  - Tenant PATCH now supports `systemPrompt` updates with min-length validation
+  - Added `GET /api/portal/tenant/:tenantId/usage` (current month usage + plan limits)
+  - Added `POST /api/portal/tenant/:tenantId/test-call` (E.164 validation, per-tenant in-memory rate limit, Twilio call creation)
+- Verified `twilio` dependency is present in `package.json`.
+- Updated this context doc for handoff.
+
+### Files touched this batch
+- `docs/CODER-CONTEXT.md`
+
+### Key exports / behavior notes
+- Portal router export remains default export from `src/portal-api.ts`.
+- New in-memory limiter for test calls:
+  - `testCallRateLimitByTenant` map
+  - Max 3 test calls per tenant per rolling hour
+- Usage plan limits map in portal API:
+  - trial → 50 calls / 120 minutes
+  - starter → 200 calls / 500 minutes
+  - growth → 500 calls / 1500 minutes
+
+### Gotchas for next batch
+- Test-call limiter is process-local in-memory state (resets on restart, not shared across multiple instances).
+- Test-call endpoint requires `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`.
+- Test-call webhook URL uses `BASE_URL` with fallback to Railway production URL.
+
+### Verification
+- `npm run build` ✅
+- Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
+
+### Git
+- Commit: `<pending>`
+- Push: `<pending>`
+
+---
+
 ## 2026-03-07 (Portal API extensions: system prompt, usage, and test call)
 
 ### Task
@@ -48,8 +90,8 @@ Extend portal API for autom8everything cross-service access with additional tena
 - Usage endpoint defaults unknown/missing plans to trial limits.
 
 ### Git
-- Commit: `<pending>`
-- Push: `<pending>`
+- Commit: `d492341`
+- Push: `origin/feature/portal-extensions`
 
 ---
 
@@ -90,47 +132,3 @@ Add protected `/api/portal` endpoints authenticated by `X-Portal-Secret` for por
 ### Gotchas
 - Middleware returns `500` if `PORTAL_API_SECRET` is missing/blank.
 - Returns `401` for missing/incorrect `X-Portal-Secret`.
-
----
-
-## 2026-03-04 (Phase 4a dashboard API + magic link auth)
-
-### Task
-Implement dashboard authentication and API surface: magic-link auth, client dashboard endpoints, admin endpoints, and auth schema migration with seeded platform admin user.
-
-### Changes made
-- Added migration `sql/006-dashboard-auth.sql`:
-  - `dashboard_users`
-  - `magic_link_tokens`
-  - dashboard auth lookup indexes
-  - platform admin seed (`aust@autom8everything.com`)
-- Added `src/dashboard/auth.ts`:
-  - `POST /dashboard/auth/request-link`
-  - `GET /dashboard/auth/verify?token=...`
-  - `POST /dashboard/auth/logout`
-  - signed session cookie handling
-  - Gmail credential parsing + SMTP send via nodemailer
-- Added `src/dashboard/client-api.ts`:
-  - `GET /dashboard/api/calls`
-  - `GET /dashboard/api/usage`
-  - `PUT /dashboard/api/settings`
-- Added `src/dashboard/admin-api.ts`:
-  - `GET /dashboard/api/admin/clients`
-  - `GET /dashboard/api/admin/export`
-- Updated `src/index.ts` route mounting for dashboard auth/admin/client APIs.
-- Updated `package.json` dependencies:
-  - added `nodemailer`
-  - added `@types/nodemailer`
-
-### Files touched
-- `sql/006-dashboard-auth.sql`
-- `src/dashboard/auth.ts`
-- `src/dashboard/client-api.ts`
-- `src/dashboard/admin-api.ts`
-- `src/index.ts`
-- `package.json`
-- `docs/CODER-CONTEXT.md`
-
-### Verification
-- `npm run build` ✅
-- Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
