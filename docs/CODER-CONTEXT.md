@@ -1,5 +1,37 @@
 # Coder Context
 
+## 2026-03-07 (Portal API extensions retry: commit + push)
+
+### Task
+Re-run verification for portal extensions on `feature/portal-extensions`, ensure the branch is ready, and complete commit/push handoff for retry.
+
+### Changes made
+- Verified `feature/portal-extensions` already contains all requested portal API implementation in `src/portal-api.ts`:
+  - Tenant GET includes `systemPrompt` (`c.system_prompt` selected + serialized)
+  - Tenant PATCH supports `systemPrompt` updates with min-length validation
+  - `GET /api/portal/tenant/:tenantId/usage` implemented
+  - `POST /api/portal/tenant/:tenantId/test-call` implemented with E.164 validation, per-tenant in-memory hourly rate limiting, and Twilio call creation
+- Verified `twilio` dependency is present in `package.json`.
+- Updated this context doc and kept only the last 3 batches.
+
+### Files touched this batch
+- `docs/CODER-CONTEXT.md`
+
+### Gotchas / notes
+- No additional source code changes were needed in this retry; implementation was already present from prior commits on this branch.
+- Test-call limiter is process-local in-memory state (resets on restart and is not shared across instances).
+- Test-call endpoint requires `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`.
+
+### Verification
+- `npm run build` ✅
+- Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
+
+### Git
+- Commit: `<pending>`
+- Push: `<pending>`
+
+---
+
 ## 2026-03-07 (Portal API extensions retry: verification + handoff)
 
 ### Task
@@ -37,8 +69,8 @@ Finalize `feature/portal-extensions` for portal API enhancements (system prompt 
 - Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
 
 ### Git
-- Commit: `<pending>`
-- Push: `<pending>`
+- Commit: `05e5337`
+- Push: `origin/feature/portal-extensions`
 
 ---
 
@@ -92,43 +124,3 @@ Extend portal API for autom8everything cross-service access with additional tena
 ### Git
 - Commit: `d492341`
 - Push: `origin/feature/portal-extensions`
-
----
-
-## 2026-03-06 (Portal API endpoints for autom8-everything cross-service access)
-
-### Task
-Add protected `/api/portal` endpoints authenticated by `X-Portal-Secret` for portal-to-cadence cross-service reads/updates.
-
-### Changes made
-- Added new router:
-  - `src/portal-api.ts` (new)
-    - Router-level `requirePortalSecret` middleware using `crypto.timingSafeEqual` with safe length handling.
-    - `GET /tenant/:tenantId`
-      - Returns tenant settings + business profile + hours/services/faqs from `clients`, `client_hours`, `client_services`, `client_faqs`.
-      - 404 when tenant not found.
-    - `PATCH /tenant/:tenantId`
-      - Supports optional updates for `greeting`, `transferNumber`, `bookingUrl`, `timezone`, `businessProfile`, `hours`, `services`, `faqs`.
-      - Uses transaction pattern aligned with dashboard settings updater.
-      - Calls `clearTenantRuntimeConfigCache(tenantId)` after commit.
-      - Returns `{ ok: true, tenant: ... }` with updated settings snapshot.
-    - `GET /tenant/:tenantId/calls`
-      - Supports `limit` (default 50, max 200) and `offset` (default 0).
-      - Returns mapped call session payload + pagination.
-- Updated API wiring:
-  - `src/index.ts`
-    - added `import portalApiRouter from "./portal-api"`
-    - mounted `app.use("/api/portal", portalApiRouter)`
-- Updated env template:
-  - `.env.example`
-    - added `PORTAL_API_SECRET=`
-
-### Files touched
-- `src/portal-api.ts` (new at the time)
-- `src/index.ts`
-- `.env.example`
-- `docs/CODER-CONTEXT.md`
-
-### Gotchas
-- Middleware returns `500` if `PORTAL_API_SECRET` is missing/blank.
-- Returns `401` for missing/incorrect `X-Portal-Secret`.
