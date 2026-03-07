@@ -27,8 +27,8 @@ Re-run verification for portal extensions on `feature/portal-extensions`, ensure
 - Frozen voice files untouched (`src/stt.ts`, `src/tts.ts`, `src/call-handler.ts`, `src/llm.ts`) ✅
 
 ### Git
-- Commit: `<pending>`
-- Push: `<pending>`
+- Commit: `2a570bb`
+- Push: `origin/feature/portal-extensions`
 
 ---
 
