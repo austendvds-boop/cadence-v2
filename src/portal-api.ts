@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import express from "express";
+import Twilio from "twilio";
 import { pool } from "./db";
 import { clearTenantRuntimeConfigCache } from "./tenant-config";
 
@@ -15,6 +16,7 @@ type PortalTenantRow = {
   owner_phone: string | null;
   timezone: string | null;
   fallback_mode: string | null;
+  system_prompt: string | null;
   business_profile: unknown;
   hours: unknown;
   services: unknown;
@@ -29,6 +31,28 @@ type CallSessionRow = {
   duration_seconds: number;
   summary_lines: unknown;
 };
+
+type UsageMonthlyRow = {
+  total_calls: number;
+  total_duration_seconds: number;
+  total_transcript_turns: number;
+  month_start: Date | string;
+};
+
+type PlanRow = {
+  plan: string | null;
+};
+
+const PLAN_LIMITS: Record<string, { callLimit: number; minuteLimit: number }> = {
+  trial: { callLimit: 50, minuteLimit: 120 },
+  starter: { callLimit: 200, minuteLimit: 500 },
+  growth: { callLimit: 500, minuteLimit: 1500 }
+};
+
+const TEST_CALL_WINDOW_MS = 60 * 60 * 1000;
+const TEST_CALL_MAX_PER_WINDOW = 3;
+const TEST_CALL_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
+const testCallRateLimitByTenant = new Map<string, number[]>();
 
 function asPlainObject(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -64,6 +88,20 @@ function parseDate(value: Date | string | null): string | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.valueOf())) return new Date(0).toISOString();
   return parsed.toISOString();
+}
+
+function parseDateOnly(value: Date | string | null): string {
+  if (value === null) return new Date().toISOString().slice(0, 10);
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.valueOf())) return parsed.toISOString().slice(0, 10);
+
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  return new Date().toISOString().slice(0, 10);
 }
 
 function normalizeSummaryLines(value: unknown): string[] {
@@ -183,6 +221,7 @@ function serializePortalTenant(row: PortalTenantRow) {
     ownerPhone: row.owner_phone,
     timezone: row.timezone,
     fallbackMode: row.fallback_mode,
+    systemPrompt: row.system_prompt,
     businessProfile: normalizeBusinessProfile(row.business_profile),
     hours: normalizeHours(row.hours),
     services: normalizeServices(row.services),
@@ -202,6 +241,7 @@ async function getPortalTenant(clientId: string): Promise<PortalTenantRow | null
       c.owner_phone,
       c.timezone,
       c.fallback_mode,
+      c.system_prompt,
       COALESCE(c.business_profile, '{}'::jsonb) AS business_profile,
       COALESCE(h.hours, '[]'::jsonb) AS hours,
       COALESCE(s.services, '[]'::jsonb) AS services,
@@ -334,6 +374,15 @@ router.patch("/tenant/:tenantId", async (req, res) => {
       return;
     }
     addUpdate("greeting", greeting);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "systemPrompt")) {
+    const systemPrompt = asOptionalString(body.systemPrompt);
+    if (!systemPrompt || systemPrompt.length < 10) {
+      res.status(400).json({ error: "systemPrompt must be a non-empty string with at least 10 characters" });
+      return;
+    }
+    addUpdate("system_prompt", systemPrompt);
   }
 
   if (Object.prototype.hasOwnProperty.call(body, "transferNumber")) {
@@ -534,6 +583,123 @@ router.get("/tenant/:tenantId/calls", async (req, res) => {
   } catch (err) {
     console.error("[PORTAL_API] failed to fetch calls", err);
     res.status(500).json({ error: "Failed to fetch calls" });
+  }
+});
+
+router.get("/tenant/:tenantId/usage", async (req, res) => {
+  try {
+    const tenantId = req.params.tenantId.trim();
+    if (!tenantId) {
+      res.status(400).json({ error: "tenantId is required" });
+      return;
+    }
+
+    const [usageResult, planResult] = await Promise.all([
+      pool.query<UsageMonthlyRow>(
+        `SELECT total_calls, total_duration_seconds, total_transcript_turns, month_start
+         FROM usage_monthly
+         WHERE client_id = $1 AND month_start = date_trunc('month', now())::date
+         LIMIT 1`,
+        [tenantId]
+      ),
+      pool.query<PlanRow>("SELECT plan FROM clients WHERE id = $1 LIMIT 1", [tenantId])
+    ]);
+
+    const planRow = planResult.rows[0];
+    if (!planRow) {
+      res.status(404).json({ error: "Tenant not found" });
+      return;
+    }
+
+    const usageRow = usageResult.rows[0] || null;
+    const planName = (planRow.plan || "trial").toLowerCase();
+    const planLimits = PLAN_LIMITS[planName] || PLAN_LIMITS.trial;
+
+    const now = new Date();
+    const monthStartFallback = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+
+    res.status(200).json({
+      usage: {
+        totalCalls: usageRow?.total_calls ?? 0,
+        totalDurationSeconds: usageRow?.total_duration_seconds ?? 0,
+        totalTranscriptTurns: usageRow?.total_transcript_turns ?? 0,
+        monthStart: usageRow ? parseDateOnly(usageRow.month_start) : monthStartFallback
+      },
+      plan: {
+        name: planName,
+        callLimit: planLimits.callLimit,
+        minuteLimit: planLimits.minuteLimit
+      }
+    });
+  } catch (err) {
+    console.error("[PORTAL_API] failed to fetch usage", err);
+    res.status(500).json({ error: "Failed to fetch usage" });
+  }
+});
+
+router.post("/tenant/:tenantId/test-call", async (req, res) => {
+  try {
+    const tenantId = req.params.tenantId.trim();
+    if (!tenantId) {
+      res.status(400).json({ error: "tenantId is required" });
+      return;
+    }
+
+    const body = (asPlainObject(req.body) || {}) as RawBody;
+    const toPhone = asOptionalString(body.toPhone);
+
+    if (!toPhone || !TEST_CALL_PHONE_REGEX.test(toPhone)) {
+      res.status(400).json({ error: "toPhone must be a valid E.164 phone number" });
+      return;
+    }
+
+    const now = Date.now();
+    const tenantEntries = (testCallRateLimitByTenant.get(tenantId) || []).filter(
+      (timestamp) => now - timestamp < TEST_CALL_WINDOW_MS
+    );
+
+    if (tenantEntries.length >= TEST_CALL_MAX_PER_WINDOW) {
+      testCallRateLimitByTenant.set(tenantId, tenantEntries);
+      res.status(429).json({ error: "Rate limit: max 3 test calls per hour" });
+      return;
+    }
+
+    const clientResult = await pool.query<{ phone_number: string | null }>(
+      "SELECT phone_number FROM clients WHERE id = $1 LIMIT 1",
+      [tenantId]
+    );
+
+    const tenantPhoneNumber = clientResult.rows[0]?.phone_number;
+    if (!tenantPhoneNumber) {
+      res.status(404).json({ error: "Tenant phone number not found" });
+      return;
+    }
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
+    const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
+
+    if (!accountSid || !authToken) {
+      res.status(500).json({ error: "Twilio credentials are not configured" });
+      return;
+    }
+
+    const baseUrl = process.env.BASE_URL || "https://cadence-v2-production.up.railway.app";
+    const twilio = Twilio(accountSid, authToken);
+
+    const call = await twilio.calls.create({
+      to: toPhone,
+      from: tenantPhoneNumber,
+      url: `${baseUrl}/incoming-call`,
+      method: "POST"
+    });
+
+    tenantEntries.push(now);
+    testCallRateLimitByTenant.set(tenantId, tenantEntries);
+
+    res.status(200).json({ ok: true, callSid: call.sid });
+  } catch (err) {
+    console.error("[PORTAL_API] failed to create test call", err);
+    res.status(500).json({ error: "Failed to create test call" });
   }
 });
 
