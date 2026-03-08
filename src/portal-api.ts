@@ -37,6 +37,10 @@ type UsageMonthlyRow = {
   total_duration_seconds: number;
   total_transcript_turns: number;
   month_start: Date | string;
+  overage_preauth_intent_id: string | null;
+  overage_billed_cents: number;
+  overage_disabled: boolean;
+  overage_notified_at: Date | string | null;
 };
 
 type PlanRow = {
@@ -45,8 +49,8 @@ type PlanRow = {
 
 const PLAN_LIMITS: Record<string, { callLimit: number; minuteLimit: number }> = {
   trial: { callLimit: 50, minuteLimit: 120 },
-  starter: { callLimit: 200, minuteLimit: 500 },
-  growth: { callLimit: 500, minuteLimit: 1500 }
+  starter: { callLimit: 200, minuteLimit: 200 },
+  growth: { callLimit: 500, minuteLimit: 500 }
 };
 
 const TEST_CALL_WINDOW_MS = 60 * 60 * 1000;
@@ -594,15 +598,20 @@ router.get("/tenant/:tenantId/usage", async (req, res) => {
       return;
     }
 
-    const [usageResult, planResult] = await Promise.all([
+    const [usageResult, planResult, clientOverageResult] = await Promise.all([
       pool.query<UsageMonthlyRow>(
-        `SELECT total_calls, total_duration_seconds, total_transcript_turns, month_start
+        `SELECT total_calls, total_duration_seconds, total_transcript_turns, month_start,
+                overage_preauth_intent_id, overage_billed_cents, overage_disabled, overage_notified_at
          FROM usage_monthly
          WHERE client_id = $1 AND month_start = date_trunc('month', now())::date
          LIMIT 1`,
         [tenantId]
       ),
-      pool.query<PlanRow>("SELECT plan FROM clients WHERE id = $1 LIMIT 1", [tenantId])
+      pool.query<PlanRow>("SELECT plan FROM clients WHERE id = $1 LIMIT 1", [tenantId]),
+      pool.query<{ overage_rate_cents: number; overage_cap_cents: number }>(
+        "SELECT overage_rate_cents, overage_cap_cents FROM clients WHERE id = $1 LIMIT 1",
+        [tenantId]
+      )
     ]);
 
     const planRow = planResult.rows[0];
@@ -614,6 +623,21 @@ router.get("/tenant/:tenantId/usage", async (req, res) => {
     const usageRow = usageResult.rows[0] || null;
     const planName = (planRow.plan || "trial").toLowerCase();
     const planLimits = PLAN_LIMITS[planName] || PLAN_LIMITS.trial;
+    const overageConfig = clientOverageResult.rows[0];
+
+    const overageFields = usageRow
+      ? {
+          overagePreauthIntentId: usageRow.overage_preauth_intent_id || null,
+          overageBilledCents: usageRow.overage_billed_cents || 0,
+          overageDisabled: usageRow.overage_disabled || false,
+          overageNotifiedAt: usageRow.overage_notified_at ? new Date(usageRow.overage_notified_at).toISOString() : null
+        }
+      : {
+          overagePreauthIntentId: null,
+          overageBilledCents: 0,
+          overageDisabled: false,
+          overageNotifiedAt: null
+        };
 
     const now = new Date();
     const monthStartFallback = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
@@ -628,7 +652,15 @@ router.get("/tenant/:tenantId/usage", async (req, res) => {
       plan: {
         name: planName,
         callLimit: planLimits.callLimit,
-        minuteLimit: planLimits.minuteLimit
+        minuteLimit: planLimits.minuteLimit,
+        overageRateCents: overageConfig?.overage_rate_cents ?? 0,
+        overageCapCents: overageConfig?.overage_cap_cents ?? 0
+      },
+      overage: {
+        preauthIntentId: overageFields.overagePreauthIntentId,
+        billedCents: overageFields.overageBilledCents,
+        disabled: overageFields.overageDisabled,
+        notifiedAt: overageFields.overageNotifiedAt
       }
     });
   } catch (err) {

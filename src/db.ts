@@ -27,6 +27,9 @@ export interface Client {
   active: boolean;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
+  monthly_minutes_limit: number | null;
+  overage_rate_cents: number;
+  overage_cap_cents: number;
 }
 
 export interface OnboardingSession {

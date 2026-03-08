@@ -7,13 +7,19 @@ import { registerCallLogger } from "./call-logger";
 import { getClientByPhone, isTrialExpired } from "./db";
 import { getTenantRuntimeConfig } from "./tenant-config";
 import { handleStripeWebhook } from "./stripe";
-import { getDeactivationReason, renderTemporarilyUnavailableTwiml } from "./deactivation-policy";
+import {
+  getDeactivationReason,
+  isOverageDisabled,
+  renderOverageDisabledTwiml,
+  renderTemporarilyUnavailableTwiml
+} from "./deactivation-policy";
 import onboardingRouter from "./onboarding";
 import dashboardAuthRouter from "./dashboard/auth";
 import dashboardClientApiRouter from "./dashboard/client-api";
 import dashboardAdminApiRouter from "./dashboard/admin-api";
 import onboardApiRouter from "./api/onboard";
 import portalApiRouter from "./portal-api";
+import { settleOverages } from "./cron/settle-overages";
 
 const app = express();
 
@@ -31,6 +37,7 @@ app.use("/dashboard/auth", dashboardAuthRouter);
 app.use("/dashboard/api/admin", dashboardAdminApiRouter);
 app.use("/dashboard/api", dashboardClientApiRouter);
 app.use("/api/portal", portalApiRouter);
+app.post("/cron/settle-overages", settleOverages);
 app.use("/dashboard", express.static("public/dashboard"));
 
 app.get("/", (_req, res) => {
@@ -54,6 +61,12 @@ app.post("/incoming-call", async (req, res) => {
     return res
       .type("text/xml")
       .send(renderTemporarilyUnavailableTwiml(client.business_name));
+  }
+
+  if (await isOverageDisabled(client.id)) {
+    return res
+      .type("text/xml")
+      .send(renderOverageDisabledTwiml(client.business_name));
   }
 
   const streamUrl = process.env.TWILIO_WEBSOCKET_URL;

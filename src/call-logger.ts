@@ -1,5 +1,6 @@
 import { pool } from "./db";
 import { setCallEndedHook, type CallEndedEvent } from "./call-handler";
+import { checkAndHandleUsage } from "./usage-limits";
 
 type TranscriptTurn = {
   speaker: "caller" | "cadence";
@@ -121,6 +122,13 @@ async function persistCallLog(event: CallEndedEvent): Promise<void> {
     );
 
     await dbClient.query("COMMIT");
+
+    // After COMMIT, check usage limits (non-blocking)
+    setImmediate(() => {
+      checkAndHandleUsage(event.client.clientId).catch((err) => {
+        console.error(`[CALL:${event.streamSid}] usage check failed`, err);
+      });
+    });
   } catch (err) {
     await dbClient.query("ROLLBACK");
     throw err;
