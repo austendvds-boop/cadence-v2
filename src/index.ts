@@ -7,7 +7,12 @@ import { registerCallLogger } from "./call-logger";
 import { getClientByPhone, isTrialExpired } from "./db";
 import { getTenantRuntimeConfig } from "./tenant-config";
 import { handleStripeWebhook } from "./stripe";
-import { getDeactivationReason, renderTemporarilyUnavailableTwiml } from "./deactivation-policy";
+import {
+  getDeactivationReason,
+  isOverageDisabled,
+  renderOverageDisabledTwiml,
+  renderTemporarilyUnavailableTwiml
+} from "./deactivation-policy";
 import onboardingRouter from "./onboarding";
 import dashboardAuthRouter from "./dashboard/auth";
 import dashboardClientApiRouter from "./dashboard/client-api";
@@ -54,6 +59,12 @@ app.post("/incoming-call", async (req, res) => {
     return res
       .type("text/xml")
       .send(renderTemporarilyUnavailableTwiml(client.business_name));
+  }
+
+  if (await isOverageDisabled(client.id)) {
+    return res
+      .type("text/xml")
+      .send(renderOverageDisabledTwiml(client.business_name));
   }
 
   const streamUrl = process.env.TWILIO_WEBSOCKET_URL;
