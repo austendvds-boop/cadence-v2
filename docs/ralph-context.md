@@ -1,5 +1,28 @@
 # Ralph Context
 
+## 2026-03-07 Batch (portal usage overage fields + settlement cron)
+
+### Files created/modified
+- `src/portal-api.ts`
+- `src/cron/settle-overages.ts` (new)
+- `src/index.ts`
+- `docs/CODER-CONTEXT.md`
+- `docs/ralph-context.md`
+
+### Key exports / interfaces
+- `src/cron/settle-overages.ts`
+  - `settleOverages(req: Request, res: Response): Promise<void>`
+- `src/portal-api.ts`
+  - `UsageMonthlyRow` now includes overage fields from `usage_monthly`
+  - `/tenant/:tenantId/usage` response now includes `overage` object and plan overage rate/cap fields
+
+### Gotchas for next batch
+- `settleOverages` requires `STRIPE_SECRET_KEY` and optional `CRON_SECRET` auth; if `CRON_SECRET` is set, the route rejects missing/mismatched secret.
+- Settlement query bills only previous month rows where `overage_billed_cents = 0` and usage exceeded `monthly_minutes_limit`.
+- Current month reset step flips `overage_disabled` back to `false` for matching rows.
+
+---
+
 ## 2026-03-07 Batch (usage-limits core)
 
 ### Files created/modified

@@ -19,6 +19,7 @@ import dashboardClientApiRouter from "./dashboard/client-api";
 import dashboardAdminApiRouter from "./dashboard/admin-api";
 import onboardApiRouter from "./api/onboard";
 import portalApiRouter from "./portal-api";
+import { settleOverages } from "./cron/settle-overages";
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use("/dashboard/auth", dashboardAuthRouter);
 app.use("/dashboard/api/admin", dashboardAdminApiRouter);
 app.use("/dashboard/api", dashboardClientApiRouter);
 app.use("/api/portal", portalApiRouter);
+app.post("/cron/settle-overages", settleOverages);
 app.use("/dashboard", express.static("public/dashboard"));
 
 app.get("/", (_req, res) => {
