@@ -19,6 +19,7 @@ type TwilioMessage = {
 };
 
 const BOOKING_LINK_REGEX = /(text|send).*(link)|(link).*(text|send)/i;
+const TRANSFER_MARKER = "[TRANSFER]";
 
 export interface ClientConfig {
   clientId: string;
@@ -34,6 +35,7 @@ export interface ClientConfig {
 
 export class CallHandler {
   private streamSid = "";
+  private callSid = "";
   private dgConnection: ListenLiveClient | null = null;
   private conversationHistory: HistoryMessage[] = [];
   private isSpeaking = false;
@@ -66,6 +68,7 @@ export class CallHandler {
 
   private async onStart(msg: TwilioMessage): Promise<void> {
     this.streamSid = msg.start?.streamSid || msg.streamSid || "unknown";
+    this.callSid = msg.start?.callSid || "";
     const params = msg.start?.customParameters || {};
     this.callerPhone = params.from || params.From || params.caller || "unknown";
     this.callStartedAt = new Date();
@@ -121,6 +124,22 @@ export class CallHandler {
       }
     }
 
+    if (response.includes(TRANSFER_MARKER)) {
+      const spokenResponse = response.replace(TRANSFER_MARKER, "").trim();
+
+      this.isSpeaking = true;
+      try {
+        await speak(spokenResponse, (audio) => this.sendAudio(audio));
+      } catch (err) {
+        console.error(`[CALL:${this.streamSid}] transfer tts failed`, err);
+      } finally {
+        this.isSpeaking = false;
+      }
+
+      await this.forwardCall();
+      return;
+    }
+
     this.isSpeaking = true;
     try {
       await speak(response, (audio) => this.sendAudio(audio));
@@ -173,6 +192,48 @@ export class CallHandler {
         media: { payload: base64Payload }
       })
     );
+  }
+
+  private async forwardCall(): Promise<void> {
+    if (!this.callSid) {
+      console.error(`[CALL:${this.streamSid}] cannot forward — no callSid`);
+      return;
+    }
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!accountSid || !authToken) {
+      console.error(`[CALL:${this.streamSid}] cannot forward — missing Twilio credentials`);
+      return;
+    }
+
+    const forwardTo = this.client.transferNumber || "+16026633502";
+    const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial>${forwardTo}</Dial></Response>`;
+
+    const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+    const form = new URLSearchParams({ Twiml: twiml });
+
+    try {
+      const res = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${this.callSid}.json`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${auth}`,
+            "Content-Type": "application/x-www-form-urlencoded"
+          },
+          body: form.toString()
+        }
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        console.error(`[CALL:${this.streamSid}] forward failed ${res.status}: ${body}`);
+      } else {
+        console.log(`[CALL:${this.streamSid}] forwarded to ${forwardTo}`);
+      }
+    } catch (err) {
+      console.error(`[CALL:${this.streamSid}] forward error`, err);
+    }
   }
 }
 
