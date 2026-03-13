@@ -87,6 +87,21 @@ export class CallHandler {
     } finally {
       this.isSpeaking = false;
     }
+
+    // Send booking link immediately on pickup — don't wait for LLM to decide
+    if (
+      !this.bookingLinkSent &&
+      this.client.smsEnabled &&
+      !!this.client.bookingUrl &&
+      this.callerPhone !== "unknown"
+    ) {
+      this.bookingLinkSent = true;
+      try {
+        await sendBookingLink(this.callerPhone, this.client.twilioNumber, this.client.bookingUrl);
+      } catch (err) {
+        console.error(`[CALL:${this.streamSid}] pickup booking link sms failed`, err);
+      }
+    }
   }
 
   private onMedia(msg: TwilioMessage): void {
@@ -160,9 +175,12 @@ export class CallHandler {
 
     if (this.client.ownerPhone) {
       try {
+        const summaryLines = this.callSummary
+          .slice(-8)
+          .map(l => l.length > 120 ? l.slice(0, 117) + "..." : l);
         await sendCallSummary(
           this.callerPhone,
-          this.callSummary.slice(-10),
+          summaryLines,
           this.client.ownerPhone,
           this.client.twilioNumber,
           this.client.businessName
